@@ -6,13 +6,17 @@ slkt_repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 slkt_version=${VERSION:-}
 if [[ -z $slkt_version ]]; then
   slkt_version=$(cat "$slkt_repo_dir/cmd/slkt/VERSION")-dev
+  slkt_separator=+
   if [[ -e $slkt_repo_dir/.git ]] && \
       slkt_revision=$(git -C "$slkt_repo_dir" rev-parse --short=12 HEAD 2>/dev/null); then
     slkt_version+=+$slkt_revision
+    slkt_separator=.
     if [[ -n $(git -C "$slkt_repo_dir" status --porcelain 2>/dev/null) ]]; then
       slkt_version+=.dirty
     fi
   fi
+  slkt_fingerprint=$(bash "$slkt_repo_dir/scripts/source-fingerprint.sh")
+  slkt_version+=$slkt_separator"src.${slkt_fingerprint:0:12}"
 fi
 if [[ ! $slkt_version =~ ^[[:alnum:]._+-]+$ ]]; then
   printf 'VERSION may contain only letters, numbers, dots, underscores, pluses, and hyphens.\n' >&2

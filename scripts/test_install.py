@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import tempfile
 import time
@@ -12,6 +13,7 @@ import unittest
 
 
 INSTALLER = Path(__file__).resolve().parents[1] / "install.sh"
+BASE_VERSION = (INSTALLER.parent / "cmd/slkt/VERSION").read_text().strip()
 IMAGE_ID = "sha256:" + "a" * 64
 
 FAKE_TOOL = r'''#!/usr/bin/env python3
@@ -103,7 +105,7 @@ class InstallerTests(unittest.TestCase):
             path.write_text(FAKE_TOOL)
             path.chmod(0o755)
         self.env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
-                        GO="slakt-test-nonexistent-go", SLKT_TEST_ROOT=str(self.root), VERSION="installer-test")
+                        GO="slakt-test-nonexistent-go", SLKT_TEST_ROOT=str(self.root), VERSION=BASE_VERSION + "-installer-test")
         self.destination = self.root / "bin with spaces"
         self.destination.mkdir()
         self.binary = self.destination / "slkt"
@@ -136,7 +138,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(os.access(self.binary, os.X_OK))
         self.assertEqual(subprocess.check_output([str(self.binary), "--version"], text=True).strip(),
-                         "slkt version installer-test")
+                         "slkt version " + BASE_VERSION + "-installer-test")
 
     def test_local_go_preferred(self):
         self.assert_installed(self.run_installer(GO="fake-go"))
@@ -159,6 +161,35 @@ class InstallerTests(unittest.TestCase):
         result = self.run_installer(VERSION="invalid version")
         self.assertEqual(result.returncode, 2)
         self.assertIn("VERSION may contain only", result.stderr)
+        self.assert_old_binary()
+
+    def test_stale_source_blocks_installation_before_build(self):
+        repo = self.root / "source checkout"
+        (repo / "cmd/slkt").mkdir(parents=True)
+        (repo / "internal").mkdir()
+        (repo / "scripts").mkdir()
+        for name in ("install.sh", "Makefile", "go.mod", "go.sum"):
+            shutil.copy2(INSTALLER.parent / name, repo / name)
+        for source in (INSTALLER.parent / "scripts").glob("*.sh"):
+            shutil.copy2(source, repo / "scripts" / source.name)
+        (repo / "cmd/slkt/VERSION").write_text(BASE_VERSION + "\n")
+        subprocess.run(["bash", str(repo / "scripts/prepare-update.sh"), "patch"],
+                       env=self.env, check=True, capture_output=True)
+        (repo / "internal/new.go").write_text("package internal\n")
+        env = dict(self.env)
+        env.pop("VERSION")
+        result = subprocess.run([str(repo / "install.sh"), str(self.destination)],
+                                cwd="/tmp", env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("source changed", result.stderr)
+        self.assert_old_binary()
+        self.assertFalse((self.root / "events").exists())
+        self.assertFalse(list(self.destination.glob(".slkt-install.*")))
+
+    def test_version_override_cannot_bypass_delivery_check(self):
+        result = self.run_installer(VERSION="99.0.0")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must use the prepared base version", result.stderr)
         self.assert_old_binary()
 
     def test_local_build_failure_does_not_fall_back(self):

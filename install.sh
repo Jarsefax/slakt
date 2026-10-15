@@ -98,6 +98,7 @@ slkt_go=${GO:-go}
 slkt_script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 slkt_repo_dir=$slkt_script_dir
 slkt_version=$(bash "$slkt_repo_dir/scripts/version.sh")
+bash "$slkt_repo_dir/scripts/check-version.sh"
 slkt_go_image=${SLKT_GO_IMAGE:-docker.io/library/golang:1.26}
 if [[ -z $slkt_install_dir ]]; then
   printf 'Install directory must not be empty.\n' >&2
@@ -202,8 +203,19 @@ else
     ' slkt-build "$slkt_version" < "$slkt_stage/source.tar" > "$slkt_stage/slkt"
 fi
 chmod 0755 -- "$slkt_stage/slkt"
-"$slkt_stage/slkt" --version
+slkt_built_version=$("$slkt_stage/slkt" --version)
+if [[ $slkt_built_version != "slkt version $slkt_version" ]]; then
+  printf 'Built binary has an unexpected version: %s\n' "$slkt_built_version" >&2
+  exit 1
+fi
+printf '%s\n' "$slkt_built_version"
+# Another chat may edit this checkout while compilation is running.
+VERSION="$slkt_version" bash "$slkt_repo_dir/scripts/check-version.sh"
 mv -fT -- "$slkt_stage/slkt" "$slkt_target"
+if [[ $("$slkt_target" --version) != "$slkt_built_version" ]]; then
+  printf 'Installed version verification failed.\n' >&2
+  exit 1
+fi
 printf 'Installed %s\n' "$slkt_target"
 
 slkt_on_path=$(command -v slkt || true)

@@ -29,15 +29,38 @@ binary for the host, checks that it runs, then atomically replaces `slkt` in the
 chosen directory. A failed build leaves the installed version intact. The
 default directory needs no sudo; a custom directory must be writable. The script
 prints a PATH command if needed, including when another `slkt` takes precedence.
-Set `VERSION=0.1.1` to label the build, or `GO=/path/to/go` to choose Go explicitly.
+Set `GO=/path/to/go` to choose Go explicitly.
 
-The release version lives in `cmd/slkt/VERSION`; bump that file for each release
-(patch for fixes, minor for features). `make release` uses that version for both
-the binary and archive. Development builds (`make build`, `./install.sh`, or
-plain `go build ./cmd/slkt`) add `-dev`, the Git revision when available, and
-`.dirty` when there are local changes, for example `0.1.1-dev+017eb0012345.dirty`.
-Run `slkt --version` to identify the installed build. `VERSION` overrides the
-label for Make and the installer; plain Go builds use embedded build metadata.
+Each completed application update delivered to a user gets a new version in
+`cmd/slkt/VERSION`. Before 1.0, use patch bumps for compatible fixes and minor
+bumps for features or compatibility changes, including renamed CLI options.
+After finishing application and build changes, prepare the update:
+
+```sh
+make prepare-update BUMP=patch       # Use BUMP=minor for features/breaking changes
+make check-version
+./install.sh
+slkt --version                      # Or slkt -V; -v is reserved for future verbosity
+```
+
+Preparation bumps the version and records the source fingerprint in
+`releases/<version>.sha256`. Commit both files with the application change.
+Never overwrite an existing record to reuse a version. Installation and
+`make release` refuse missing, stale, or rewritten committed records. If you
+change application/build inputs after preparation, prepare a new version.
+Tests and documentation alone do not require a bump. Fingerprints cover
+`go.mod`, `go.sum`, `Makefile`, `install.sh`, shell scripts in `scripts/`, and
+non-test files in `cmd/` and `internal/` (excluding the version file).
+The record travels with source archives, so validation also works without Git.
+
+`make build` allows intermediate development edits without preparing a delivery.
+Development builds and installations include the commit, local-change marker,
+and source fingerprint, such as `0.2.0-dev+0ac15ea56a5a.dirty.src.0123456789ab`.
+The fingerprint distinguishes different uncommitted application edits.
+Plain `go build ./cmd/slkt` uses Git metadata and a `bin.<hash>` executable
+fingerprint instead. `make release` uses the numeric version for the binary and
+archive. `VERSION` can customize development labels; installation and release
+require its base to match the prepared version, and always validate the source.
 
 If local Go is unavailable, the installer tries a usable **Podman**, then
 **Docker**, runtime. The fallback uses `docker.io/library/golang:1.26`; set

@@ -18,6 +18,31 @@ func run(t *testing.T, args ...string) (string, error) {
 	return out.String(), err
 }
 
+func TestVersionFlags(t *testing.T) {
+	for _, flag := range []string{"--version", "-V"} {
+		t.Run(flag, func(t *testing.T) {
+			out, err := run(t, flag)
+			if err != nil || out != "slkt version test\n" {
+				t.Fatalf("output=%q err=%v", out, err)
+			}
+		})
+	}
+	if out, err := run(t, "-v"); err == nil || !strings.Contains(err.Error(), "unknown shorthand flag: 'v'") {
+		t.Fatalf("-v should be reserved: output=%q err=%v", out, err)
+	}
+}
+
+func TestHelpFlags(t *testing.T) {
+	for _, flag := range []string{"--help", "-h"} {
+		t.Run(flag, func(t *testing.T) {
+			out, err := run(t, flag)
+			if err != nil || !strings.Contains(out, "-h, --help") || !strings.Contains(out, "-V, --version") || strings.Contains(out, "-v, --version") {
+				t.Fatalf("output=%q err=%v", out, err)
+			}
+		})
+	}
+}
+
 func TestOfflineCLICommands(t *testing.T) {
 	for _, args := range [][]string{{"--demo", "channels", "--json"}, {"--demo", "read", "#general", "--limit", "2", "--json"}, {"--demo", "auth", "status", "--json"}, {"--demo", "search", "in:engineering deploy", "--json"}, {"--demo", "send", "#general", "hello", "--json"}, {"--demo", "doctor", "--json"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {

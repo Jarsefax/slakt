@@ -66,6 +66,7 @@ func New(version string) *cobra.Command {
 	root := &cobra.Command{Use: "slkt", Short: "Slack, at home in your terminal", Long: "slakt is a Slack CLI and terminal UI. Run slkt without a subcommand to browse.\nTry slkt --demo for a completely offline workspace.", Version: version, SilenceUsage: true, SilenceErrors: true, Args: cobra.NoArgs}
 	root.SetOut(os.Stdout)
 	root.SetErr(os.Stderr)
+	root.Flags().BoolP("version", "V", false, "version for slkt")
 	root.PersistentFlags().BoolVar(&o.demo, "demo", false, "Use an offline in-memory workspace")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "Print structured JSON for data commands")
 	root.PersistentFlags().DurationVar(&o.poll, "poll-interval", 15*time.Second, "TUI refresh interval (minimum 5s)")
