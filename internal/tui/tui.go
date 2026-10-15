@@ -24,6 +24,7 @@ var accent = lipgloss.NewStyle().Foreground(lipgloss.Color("#C4B5FD"))
 var muted = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B93A6"))
 var titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E8EAF0"))
 var selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#DCD6FF")).Background(lipgloss.Color("#2B2541"))
+var borderColor = lipgloss.Color("#333849")
 
 type Options struct {
 	Initial      *core.Conversation
@@ -900,8 +901,13 @@ func (m model) editCmd() tea.Cmd {
 func fit(text string, width int) string {
 	return ansi.Truncate(strings.ReplaceAll(render.Safe(text), "\n", " "), max(1, width), "…")
 }
+
+func separator(width int) string {
+	return lipgloss.NewStyle().Foreground(borderColor).Render(strings.Repeat("─", max(0, width)))
+}
+
 func (m model) sidebarView(width, height int) string {
-	lines := []string{muted.Render("  CONVERSATIONS"), ""}
+	lines := []string{muted.Render("  CONVERSATIONS"), separator(width)}
 	start := 0
 	if m.sideIndex > height-5 {
 		start = m.sideIndex - height + 5
@@ -920,7 +926,7 @@ func (m model) sidebarView(width, height int) string {
 		}
 		lines = append(lines, label)
 	}
-	return lipgloss.NewStyle().Width(width).Height(height).BorderStyle(lipgloss.NormalBorder()).BorderRight(true).BorderForeground(lipgloss.Color("#333849")).Render(strings.Join(lines, "\n"))
+	return lipgloss.NewStyle().Width(width).Height(height).BorderStyle(lipgloss.NormalBorder()).BorderRight(true).BorderForeground(borderColor).Render(strings.Join(lines, "\n"))
 }
 
 func pane(v view, width, height int, label string) string {
@@ -928,7 +934,7 @@ func pane(v view, width, height int, label string) string {
 		label += " · loading…"
 	}
 	caption := titleStyle.Render(fit(label, width))
-	return lipgloss.NewStyle().Width(width).Height(height + 2).Render(caption + "\n" + v.viewport.View() + "\n" + muted.Render("  "+func() string {
+	return lipgloss.NewStyle().Width(width).Height(height + 3).Render(caption + "\n" + separator(width) + "\n" + v.viewport.View() + "\n" + muted.Render("  "+func() string {
 		if v.hasMore {
 			return "n · load more"
 		}
@@ -977,7 +983,7 @@ func (m model) View() string {
 			body = pane(v, width, height, label)
 		}
 		if side > 0 {
-			body = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(side-1, height+2), " ", body)
+			body = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(side-1, height+3), " ", body)
 		}
 	}
 	var bottom string
@@ -1018,5 +1024,5 @@ func (m model) View() string {
 		bottom = muted.Render(fit(" ↑/↓ scroll · ? or Esc close help", m.width))
 	}
 	status := muted.Render(" "+fit(m.status, m.width-3)) + "\n" + muted.Render(fit(fmt.Sprintf(" polling every %s · %s", m.options.PollInterval, m.identity.User), m.width))
-	return header + "\n\n" + body + "\n" + bottom + "\n" + status
+	return header + "\n" + separator(m.width) + "\n" + body + "\n" + separator(m.width) + "\n" + bottom + "\n" + status
 }
