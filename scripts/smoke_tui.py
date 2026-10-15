@@ -56,8 +56,10 @@ def main():
         send(b"j")
         assert "Thread" in send(b"\r"), "thread did not open"
         assert "To #general / thread" in send(b"i"), "thread destination missing"
-        send(b"Offline PTY thread smoke test.")
-        assert "Message sent" in send(b"\x13"), "demo thread send failed"
+        send(b"Offline PTY thread smoke test. :thumbsup: :female-technologist::skin-tone-4:")
+        sent = send(b"\x13")
+        assert "Message sent" in sent, "demo thread send failed"
+        assert "👍" in sent and "👩🏽‍💻" in sent, "sent emoji did not render"
         send(b"\x1b")
         send(b"\x1b")
         send(b"/")
@@ -81,7 +83,7 @@ def main():
         send(b"?")
         send(b"q")
         assert process.wait(timeout=3) == 0, "TUI exited unsuccessfully"
-        print("PASS: channel jump, thread send, search/result thread, DM send, resize, help, quit (offline PTY)")
+        print("PASS: channel jump, thread send with emoji, search/result thread, DM send, resize, help, quit (offline PTY)")
     finally:
         if process.poll() is None:
             process.terminate()

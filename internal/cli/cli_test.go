@@ -29,6 +29,17 @@ func TestOfflineCLICommands(t *testing.T) {
 	}
 }
 
+func TestEmojiDisplayPreservesOriginalJSON(t *testing.T) {
+	out, err := run(t, "--demo", "read", "#random")
+	if err != nil || !strings.Contains(out, "☕") || strings.Contains(out, ":coffee:") {
+		t.Fatalf("emoji missing from plain text: %q, err=%v", out, err)
+	}
+	out, err = run(t, "--demo", "read", "#random", "--json")
+	if err != nil || !json.Valid([]byte(out)) || !strings.Contains(out, ":coffee:") {
+		t.Fatalf("JSON lost original emoji name: %q, err=%v", out, err)
+	}
+}
+
 func TestCLIRejectsInvalidInputWithoutOpeningTUI(t *testing.T) {
 	for _, args := range [][]string{{"send", "#general"}, {"--demo", "read", "#general", "--limit", "0"}, {"--demo", "thread", "not-a-url"}, {"--demo", "auth", "login"}, {"--demo", "search", "query", "--page", "0"}, {"--json"}, {"--unknown"}} {
 		if out, err := run(t, args...); err == nil {

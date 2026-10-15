@@ -15,7 +15,8 @@ import (
 )
 
 // Safe removes ANSI/OSC/DCS sequences, control characters and invisible format
-// controls. Run it after decoding entities and Slack markup, never before only.
+// controls, except emoji joiners and tag characters. Run it after decoding
+// entities and Slack markup, never before only.
 func Safe(text string) string {
 	text = ansi.Strip(text)
 	return strings.Map(func(r rune) rune {
@@ -24,6 +25,9 @@ func Safe(text string) string {
 		}
 		if r == '\t' {
 			return ' '
+		}
+		if r == '\u200d' || (r >= '\U000e0020' && r <= '\U000e007f') {
+			return r
 		}
 		if unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return -1
@@ -62,7 +66,7 @@ func Text(text string, names map[string]string) string {
 		}
 		return target
 	})
-	return Safe(html.UnescapeString(text))
+	return Safe(emojiText(html.UnescapeString(text)))
 }
 
 func Time(ts string) string {
@@ -97,7 +101,7 @@ func Message(m core.Message, names map[string]string) string {
 	if len(m.Reactions) > 0 {
 		out.WriteString("\n")
 		for _, r := range m.Reactions {
-			fmt.Fprintf(&out, ":%s: %d  ", Safe(r.Name), r.Count)
+			fmt.Fprintf(&out, "%s %d  ", Safe(emojiText(":"+r.Name+":")), r.Count)
 		}
 	}
 	return out.String()

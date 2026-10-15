@@ -164,6 +164,10 @@ expansion. Unsaved drafts do not survive process exit or a crash.
   Slack before retrying. The composer keeps the draft on failure.
 - Terminal output strips untrusted control sequences. JSON escapes controls while
   preserving the decoded content. Tokens and message bodies are not logged.
+- Standard emoji names in messages and reactions display as Unicode emoji,
+  including skin tones and combined emoji. Code snippets and URLs stay literal;
+  custom or unknown emoji stay as `:name:`. Appearance and color depend on the
+  terminal and its fonts. JSON preserves the original Slack names.
 - Files, rich blocks, calls, canvases, and workflows can be opened in Slack;
   file upload and rich interactions are deferred.
 

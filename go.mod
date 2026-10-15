@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/gofrs/flock v0.13.1
+	github.com/kyokomi/emoji/v2 v2.2.13
 	github.com/slack-go/slack v0.30.1
 	github.com/spf13/cobra v1.10.2
 	github.com/zalando/go-keyring v0.2.8

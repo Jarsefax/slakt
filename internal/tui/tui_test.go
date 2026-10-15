@@ -207,3 +207,23 @@ func TestFramesFitTerminal(t *testing.T) {
 		}
 	}
 }
+
+func TestEmojiMessagesFitTerminal(t *testing.T) {
+	for _, size := range [][2]int{{40, 15}, {80, 24}, {140, 40}} {
+		m := loadedModel(t)
+		m.main.messages = []core.Message{{
+			Timestamp: "1.000001", Text: strings.Repeat(":female-technologist::skin-tone-4: :thumbsup: ", 30),
+			Reactions: []core.Reaction{{Name: "thumbsup", Count: 2}},
+		}}
+		m.main.selected = 0
+		mm, _ := m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		m = mm.(model)
+		frame := m.View()
+		if !strings.Contains(frame, "👩🏽‍💻") {
+			t.Fatalf("emoji missing from frame at %v: %s", size, frame)
+		}
+		if width, height := lipgloss.Size(frame); width > size[0] || height > size[1] {
+			t.Errorf("emoji frame at %v is %dx%d", size, width, height)
+		}
+	}
+}
