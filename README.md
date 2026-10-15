@@ -19,12 +19,12 @@ make build
 To build and install the tool on Linux, or replace an older installation:
 
 ```sh
-./scripts/install.sh                 # Installs to ~/.local/bin/slkt
+./install.sh                         # Installs to ~/.local/bin/slkt
 slkt --demo
 ```
 
 The installer works from any working directory and accepts an optional install
-directory, for example `./scripts/install.sh "$HOME/bin"`. It builds a pure-Go
+directory, for example `./install.sh "$HOME/bin"`. It builds a pure-Go
 binary for the host, checks that it runs, then atomically replaces `slkt` in the
 chosen directory. A failed build leaves the installed version intact. The
 default directory needs no sudo; a custom directory must be writable. The script

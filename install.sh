@@ -34,7 +34,7 @@ if ! command -v -- "$slkt_go" >/dev/null 2>&1; then
 fi
 
 slkt_script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-slkt_repo_dir=$(cd -- "$slkt_script_dir/.." && pwd -P)
+slkt_repo_dir=$slkt_script_dir
 slkt_host_os=$("$slkt_go" env GOHOSTOS)
 slkt_host_arch=$("$slkt_go" env GOHOSTARCH)
 if [[ $slkt_host_os != linux ]]; then
