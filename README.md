@@ -31,6 +31,26 @@ default directory needs no sudo; a custom directory must be writable. The script
 prints a PATH command if needed, including when another `slkt` takes precedence.
 Set `VERSION=0.1.0` to label the build, or `GO=/path/to/go` to choose Go explicitly.
 
+If local Go is unavailable, the installer tries a usable **Podman**, then
+**Docker**, runtime. The fallback uses `docker.io/library/golang:1.26`; set
+`SLKT_GO_IMAGE` to override the builder image. A first build may download the
+image and Go dependencies. Container builds require the Linux coreutils `timeout`
+command. An existing local Go build failure is reported without retrying the
+compilation in a container.
+
+The container receives a temporary copy of `go.mod`, `go.sum`, `cmd`, and
+`internal`, and streams the built binary back to the installer. Its workspace
+and Go caches are disposable; no host directories or credentials are mounted.
+The resulting binary runs directly on the host after installation.
+
+Containers use automatic removal, with an exit/signal trap to remove this run's
+container after failure or interruption. Images already present are retained,
+including images cached under another tag. If the installer pulls a new image,
+cleanup attempts to remove that exact image without forcing deletion or pruning
+parent images. A shared/in-use image or unavailable runtime can prevent cleanup;
+the script reports a warning while preserving the original exit status. Staging
+files are also removed. SIGKILL and power loss cannot run shell cleanup traps.
+
 The offline demo needs no Slack app, credentials, or network connection. Messages
 and drafts in the demo live only until the process exits. Demo search supports
 text, `in:channel`, and `from:person`; real search uses Slack's query syntax.
@@ -155,6 +175,7 @@ make race          # Race detector (requires a C toolchain for testing)
 make vet
 make build         # CGO_ENABLED=0 native binary
 make release       # Linux AMD64 archive + SHA-256
+python3 scripts/test_install.py  # Isolated installer lifecycle tests; no real containers
 python3 scripts/smoke_tui.py  # Linux PTY workflow against the offline demo
 ```
 
