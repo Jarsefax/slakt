@@ -29,7 +29,15 @@ binary for the host, checks that it runs, then atomically replaces `slkt` in the
 chosen directory. A failed build leaves the installed version intact. The
 default directory needs no sudo; a custom directory must be writable. The script
 prints a PATH command if needed, including when another `slkt` takes precedence.
-Set `VERSION=0.1.0` to label the build, or `GO=/path/to/go` to choose Go explicitly.
+Set `VERSION=0.1.1` to label the build, or `GO=/path/to/go` to choose Go explicitly.
+
+The release version lives in `cmd/slkt/VERSION`; bump that file for each release
+(patch for fixes, minor for features). `make release` uses that version for both
+the binary and archive. Development builds (`make build`, `./install.sh`, or
+plain `go build ./cmd/slkt`) add `-dev`, the Git revision when available, and
+`.dirty` when there are local changes, for example `0.1.1-dev+017eb0012345.dirty`.
+Run `slkt --version` to identify the installed build. `VERSION` overrides the
+label for Make and the installer; plain Go builds use embedded build metadata.
 
 If local Go is unavailable, the installer tries a usable **Podman**, then
 **Docker**, runtime. The fallback uses `docker.io/library/golang:1.26`; set

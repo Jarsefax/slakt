@@ -142,6 +142,25 @@ class InstallerTests(unittest.TestCase):
         self.assert_installed(self.run_installer(GO="fake-go"))
         self.assertTrue(all(tool == "fake-go" for tool, _ in self.events()))
 
+    def test_default_version_matches_local_and_container_builds(self):
+        self.env.pop("VERSION")
+        expected = subprocess.check_output(
+            ["bash", str(INSTALLER.parent / "scripts/version.sh")], env=self.env, text=True).strip()
+        base = (INSTALLER.parent / "cmd/slkt/VERSION").read_text().strip()
+        self.assertTrue(expected.startswith(base + "-dev"), expected)
+        for go in ("fake-go", "slakt-test-nonexistent-go"):
+            with self.subTest(go=go):
+                result = self.run_installer(GO=go)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(subprocess.check_output([str(self.binary), "--version"], text=True).strip(),
+                                 "slkt version " + expected)
+
+    def test_invalid_version_keeps_existing_installation(self):
+        result = self.run_installer(VERSION="invalid version")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("VERSION may contain only", result.stderr)
+        self.assert_old_binary()
+
     def test_local_build_failure_does_not_fall_back(self):
         self.assertEqual(self.run_installer(GO="fake-go", SLKT_TEST_BUILD_EXIT="23").returncode, 23)
         self.assert_old_binary()

@@ -5,7 +5,7 @@ set -euo pipefail
 usage() {
   printf 'Usage: %s [INSTALL_DIR]\n' "${0##*/}"
   printf 'Build slkt and replace INSTALL_DIR/slkt (default: $HOME/.local/bin/slkt).\n'
-  printf 'Environment: GO selects the Go executable; VERSION defaults to 0.1.0-dev.\n'
+  printf 'Environment: GO selects the Go executable; VERSION overrides the shared development build label.\n'
   printf 'Without local Go, try Podman then Docker using SLKT_GO_IMAGE (default: docker.io/library/golang:1.26).\n'
 }
 
@@ -95,14 +95,12 @@ fi
 
 slkt_install_dir=${1-"$HOME/.local/bin"}
 slkt_go=${GO:-go}
-slkt_version=${VERSION:-0.1.0-dev}
+slkt_script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+slkt_repo_dir=$slkt_script_dir
+slkt_version=$(bash "$slkt_repo_dir/scripts/version.sh")
 slkt_go_image=${SLKT_GO_IMAGE:-docker.io/library/golang:1.26}
 if [[ -z $slkt_install_dir ]]; then
   printf 'Install directory must not be empty.\n' >&2
-  exit 2
-fi
-if [[ ! $slkt_version =~ ^[[:alnum:]._+-]+$ ]]; then
-  printf 'VERSION may contain only letters, numbers, dots, underscores, pluses, and hyphens.\n' >&2
   exit 2
 fi
 if [[ $(uname -s) != Linux ]]; then
@@ -110,8 +108,6 @@ if [[ $(uname -s) != Linux ]]; then
   exit 1
 fi
 
-slkt_script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-slkt_repo_dir=$slkt_script_dir
 slkt_runtime=
 slkt_use_local_go=false
 slkt_goarm=
