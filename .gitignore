@@ -1,0 +1,5 @@
+/bin/
+/dist/
+/slkt
+*.test
+coverage.out

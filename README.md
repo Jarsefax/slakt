@@ -1,54 +1,159 @@
 # slakt
 
-slakt is a planned terminal client for the company's Slack workspace. Its only
-executable command is **`slkt`**.
+Slack, at home in your terminal. **`slkt`** is the only executable: run it without
+arguments for the terminal UI, or use subcommands for quick actions and scripts.
 
-Run `slkt` without arguments to open the interactive terminal UI (TUI). Use
-subcommands for quick actions and scripting from the command line (CLI).
+The first version includes channels, private conversations, DMs, paginated
+history, threads, search, messages, and reactions. It runs locally, uses your
+Slack identity, and stores OAuth credentials in your OS keyring.
 
-The first version focuses on daily Slack use: channels, DMs, threads, and search.
-The project is currently in planning; the commands below are proposed behavior,
-not implemented features.
+## Try it
 
-## Agreed direction
-
-- Build in Go and favor pure-Go dependencies.
-- Distribute native binaries so users do not need Go installed.
-- Keep builds working with `CGO_ENABLED=0`; evaluate dependency choices against
-  this requirement.
-- Provide both CLI and TUI interfaces through `slkt`.
-- Use a custom Slack app, which the owner can install or obtain approval for.
-- Start with the owner's account in one workspace on Linux.
-- Preserve a path to colleagues on Linux, Windows, and macOS without requiring
-  those platforms or shared services in the first release.
-
-## Current status
-
-This repository contains planning documentation only. No implementation,
-dependency downloads, Slack app setup, or workspace API tests have been performed.
-The owner will explicitly start implementation in a new chat after reviewing and
-committing the documentation.
-
-The [implementation handoff](docs/implementation-handoff.md) provides the context
-and a suggested starting prompt for that chat.
-
-## Proposed usage
+For development, install Go **1.26 or newer**, then:
 
 ```sh
-slkt                                  # Open the TUI
-slkt auth login
-slkt auth status
-slkt auth logout
-slkt channels
-slkt read '#engineering' --limit 30
-slkt dm @alice                         # Open this DM in the TUI
-slkt thread <message-url>
-slkt send '#engineering' 'Hello'
-slkt reply <message-url> 'Looks good'
-slkt search 'in:engineering deploy after:2026-10-01'
-slkt search 'from:alice' --json
-slkt doctor
+make build
+./bin/slkt --demo
 ```
 
-See [the project plan](docs/plan.md) for scope, architecture, milestones, and open
-questions. Keep that document updated as decisions are made.
+The offline demo needs no Slack app, credentials, or network connection. Messages
+and drafts in the demo live only until the process exits. Demo search supports
+text, `in:channel`, and `from:person`; real search uses Slack's query syntax.
+
+`make release` produces a Linux AMD64 archive and checksum in `dist/`. People
+running that binary do **not** need Go. Linux AMD64 is the initial target;
+Windows/macOS integration is not yet certified.
+
+## Connect your workspace
+
+Create or obtain approval for an internal Slack app using the supplied
+[manifest](docs/slack-app-manifest.json). Enable PKCE and token rotation and
+register `http://localhost:8765/callback`. Follow the full
+[Slack app setup guide](docs/slack-app.md), then:
+
+```sh
+./bin/slkt auth login --client-id YOUR_PUBLIC_CLIENT_ID
+./bin/slkt auth status
+./bin/slkt doctor
+./bin/slkt
+```
+
+Login opens your browser and runs a temporary loopback callback listener. The
+client ID is public configuration; no client secret is needed or embedded. On
+Linux, an unlocked Secret Service provider such as GNOME Keyring is required.
+`SLKT_CLIENT_ID` and `SLKT_REDIRECT_URL` provide defaults for the login flags.
+Browser and CLI must run on the same machine for this first version.
+
+Credentials go to the OS keyring under service `slakt`, account `default`. Only a
+credential lock file is stored in the user's config directory (`slakt/auth.lock`).
+There is no plaintext-token fallback. Login replaces the single active account;
+logout removes local credentials and does not revoke app authorization in Slack.
+
+## CLI
+
+```sh
+slkt                                      # Interactive TUI
+slkt channels
+slkt read '#engineering' --limit 30
+slkt read C012345 --cursor 'NEXT_CURSOR'
+slkt dm @alice                             # Open a DM in the TUI
+slkt thread 'https://work.slack.com/archives/C012345/p1720000000000001'
+slkt send '#engineering' 'Hello'
+slkt reply 'C012345:1720000000.000001' 'Looks good'
+slkt react 'C012345:1720000000.000001' thumbsup
+slkt search 'in:engineering deploy after:2026-10-01'
+slkt search 'from:alice' --limit 30 --page 2 --json
+slkt auth logout
+```
+
+All data commands accept `--json`. History/thread JSON contains `messages`,
+`has_more`, and `next_cursor`; use `--cursor` to continue. History is returned
+oldest first **within each page**, starting with the most recent page. Thread
+pages start with the parent and oldest replies. Search JSON includes total and
+page counts. Messages include `channel_id` and exact Slack `ts` so scripts can
+address them without URLs. Reactions target the exact linked message; `thread`
+and `reply` follow a link's parent `thread_ts` when present.
+If Slack provides `has_more` without a cursor, use `--before` the oldest history
+timestamp or `--after` the newest thread timestamp to continue.
+
+Names must be unambiguous. Use Slack conversation/user IDs when names collide.
+`channels` lists the authenticated user's joined conversations, not every public
+channel. Referring to a DM as `@person` can open that DM through
+`conversations.open`. Errors go to stderr. Exit status is 0 on success,
+1 on failure, and 130 on interruption. Without a terminal, specify a subcommand.
+
+## TUI keys
+
+| Key | Action |
+| --- | --- |
+| `Ctrl+k` | Jump to a conversation or person; arrows choose a result |
+| `Tab` | Focus/unfocus the conversation sidebar |
+| `j/k`, arrows | Select a message or conversation |
+| `PgUp/PgDn`, `Ctrl+u/d` | Scroll long messages |
+| `g/G` | First/last loaded message |
+| `Enter` | Open a thread or search result |
+| `i` | Compose; Enter inserts a newline |
+| `Ctrl+s` | Send the draft |
+| `Ctrl+e` | Edit draft with `$VISUAL`, `$EDITOR`, or `vi` |
+| `Esc` | Save draft in this session / close thread or search |
+| `/` | Search |
+| `n` | Load another history/thread page or search page |
+| `r` | Add a reaction by emoji name |
+| `o` | Open selected message in Slack |
+| `R` | Reload current conversation |
+| `?` | Keybinding guide |
+| `q`, `Ctrl+c` | Quit (use Ctrl+c while composing) |
+
+Threads appear alongside the timeline on wide terminals and replace it on narrow
+ones. The minimum size is 40×15. Destinations and thread context remain visible
+while writing. Drafts are separate per conversation/thread and survive navigation
+within the session. External editors receive a private temporary file; editor
+commands accept an executable and whitespace-separated arguments, without shell
+expansion. Unsaved drafts do not survive process exit or a crash.
+
+## Refresh behavior and limits
+
+- The TUI polls the active channel and open thread every **15 seconds** by
+  default. Change this with `--poll-interval 30s` (minimum 5s). This is not a
+  Socket Mode event feed and needs no app-level token.
+- Reads honor Slack's `Retry-After`, retry transient failures up to three times,
+  and support cancellation. Refresh resumes automatically after disconnection.
+  Gap recovery walks pages back to the previously newest message. Selection and
+  scroll position stay anchored; the cache holds at most 500 messages per view.
+- Recent channel messages are refreshed for edits/reactions. Deleted cached
+  messages and edits to older/thread replies may remain until reload. There are
+  no exact unread counts, read-position synchronization, or background alerts.
+- Failed refreshes keep the current view. Polling catches up when connectivity
+  returns; recovering very large gaps is limited to 100 pages per refresh.
+- Writes are never automatically retried. If a send's outcome is unknown, check
+  Slack before retrying. The composer keeps the draft on failure.
+- Terminal output strips untrusted control sequences. JSON escapes controls while
+  preserving the decoded content. Tokens and message bodies are not logged.
+- Files, rich blocks, calls, canvases, and workflows can be opened in Slack;
+  file upload and rich interactions are deferred.
+
+## Development and verification
+
+```sh
+make test          # Unit and simulated-API tests
+make race          # Race detector (requires a C toolchain for testing)
+make vet
+make build         # CGO_ENABLED=0 native binary
+make release       # Linux AMD64 archive + SHA-256
+python3 scripts/smoke_tui.py  # Linux PTY workflow against the offline demo
+```
+
+Tests use an in-memory workspace and local HTTP servers, covering OAuth
+state/PKCE, refresh rotation/storage failure, pagination, rate limits, uncertain
+sends, gap recovery, drafts, and terminal sanitization. Normal tests never access
+the real keyring or Slack workspace. Dependency versions are pinned in
+`go.mod`/`go.sum`; [third-party notices](docs/THIRD_PARTY_NOTICES.md) accompany the
+release. The race detector's C requirement does not apply to shipped builds.
+Regenerate release license texts after dependency changes with
+`python3 scripts/third_party_notices.py`.
+
+Real workspace OAuth, scope coverage, keyring lock/unlock, rate-limit tier, and
+terminal/browser integrations still need owner acceptance using
+[the setup checklist](docs/slack-app.md). No test message has been sent to Slack.
+See [the plan](docs/plan.md) and [handoff](docs/implementation-handoff.md) for
+remaining work.
