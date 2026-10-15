@@ -52,6 +52,14 @@ used. Slack's history rate limits depend on app classification: confirm the app
 qualifies as an internal customer-built app before relying on 15-second polling.
 Increase `--poll-interval` if needed; reads honor Slack's Retry-After response.
 
+The conversation directory groups public/private channels, DMs, and group DMs
+using conversation type flags. When `users.conversations` includes `is_starred`,
+the conversation appears in Starred instead of its type section. This limited
+response may omit starred metadata; slakt does not fetch every conversation's
+details to fill it in. No additional scope is needed. Custom Slack sidebar
+sections are not exposed by the documented Web API, and the deprecated
+`stars.list` saved-items API is not used.
+
 ## Credential service
 
 On Linux, run an unlocked Secret Service provider in the desktop session (GNOME

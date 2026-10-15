@@ -11,6 +11,7 @@ import (
 	"github.com/Jarsefax/slakt/internal/demo"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func loadedModel(t *testing.T) model {
@@ -35,12 +36,90 @@ func key(m model, k string) (model, tea.Cmd) {
 		msg.Type = tea.KeyEnter
 	case "ctrl+s":
 		msg.Type = tea.KeyCtrlS
+	case "tab":
+		msg.Type = tea.KeyTab
 	default:
 		msg.Type = tea.KeyRunes
 		msg.Runes = []rune(k)
 	}
 	mm, cmd := m.Update(msg)
 	return mm.(model), cmd
+}
+
+func TestSidebarSectionsSkipHeadingsDuringNavigation(t *testing.T) {
+	m := loadedModel(t)
+	frame := ansi.Strip(m.sidebarView(22, 20))
+	previous := -1
+	for _, heading := range []string{"Starred", "Channels", "Direct messages", "Group messages"} {
+		position := strings.Index(frame, heading)
+		if position <= previous {
+			t.Fatalf("missing or misplaced %q: %s", heading, frame)
+		}
+		previous = position
+	}
+	if strings.Count(frame, "#engineering") != 1 {
+		t.Fatalf("starred conversation duplicated: %s", frame)
+	}
+	m, _ = key(m, "tab")
+	for i := range m.conversations {
+		if m.sideIndex != i {
+			t.Fatalf("navigation stopped at a heading: index %d, want %d", m.sideIndex, i)
+		}
+		selected, cmd := key(m, "enter")
+		if cmd == nil || selected.main.conversation.ID != m.conversations[i].ID {
+			t.Fatalf("Enter opened the wrong conversation at index %d", i)
+		}
+		m, _ = key(m, "j")
+	}
+	for i := len(m.conversations) - 1; i >= 0; i-- {
+		if m.sideIndex != i {
+			t.Fatalf("reverse navigation stopped at a heading: index %d, want %d", m.sideIndex, i)
+		}
+		m, _ = key(m, "k")
+	}
+}
+
+func TestSidebarScrollKeepsSelectedConversationAndSectionVisible(t *testing.T) {
+	m := loadedModel(t)
+	m.conversations = nil
+	for i := range 40 {
+		m.conversations = append(m.conversations, core.Conversation{ID: fmt.Sprintf("D%02d", i), Name: fmt.Sprintf("person%02d", i), Kind: "dm"})
+	}
+	m.sidebar = true
+	for i, c := range m.conversations {
+		m.sideIndex = i
+		frame := ansi.Strip(m.sidebarView(22, 6))
+		if !strings.Contains(frame, c.Label()) || !strings.Contains(frame, "Direct messages") {
+			t.Fatalf("selection or heading scrolled away at %d: %s", i, frame)
+		}
+		if width, height := lipgloss.Size(frame); width > 23 || height > 6 {
+			t.Fatalf("sidebar overflow: %dx%d", width, height)
+		}
+	}
+	last := m.conversations[len(m.conversations)-1]
+	m.switchTo(last)
+	m.sideIndex = 0 // A jump prompt can change this while the sidebar is unfocused.
+	if frame := ansi.Strip(m.sidebarView(22, 6)); !strings.Contains(frame, last.Label()) {
+		t.Fatalf("active conversation scrolled away: %s", frame)
+	}
+	m, _ = key(m, "tab")
+	if m.sideIndex != len(m.conversations)-1 {
+		t.Fatal("sidebar focus did not start at the active conversation")
+	}
+}
+
+func TestSidebarHidesEmptySectionsAndGroupsNewDMs(t *testing.T) {
+	m := loadedModel(t)
+	m.conversations = []core.Conversation{{ID: "C1", Name: "general", Kind: "channel"}}
+	mm, _ := m.Update(dmResult{conversation: core.Conversation{ID: "DNEW", Name: "aaron", Kind: "dm"}})
+	m = mm.(model)
+	frame := ansi.Strip(m.sidebarView(22, 20))
+	if strings.Contains(frame, "Starred") || strings.Contains(frame, "Group messages") || !strings.Contains(frame, "Direct messages") || !strings.Contains(frame, "@aaron") {
+		t.Fatalf("incorrect sections after opening a DM: %s", frame)
+	}
+	if m.sideIndex != 1 || m.conversations[m.sideIndex].ID != "DNEW" {
+		t.Fatal("new DM was not selected in its section")
+	}
 }
 
 func TestDraftsSurviveConversationSwitchesAndThreadContext(t *testing.T) {

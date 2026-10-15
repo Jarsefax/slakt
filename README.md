@@ -148,6 +148,21 @@ channel. Referring to a DM as `@person` can open that DM through
 `conversations.open`. Errors go to stderr. Exit status is 0 on success,
 1 on failure, and 130 on interruption. Without a terminal, specify a subcommand.
 
+The TUI sidebar and plain-text `channels` output group conversations into
+**Starred**, **Channels** (public and private), **Direct messages**, and
+**Group messages**, with names sorted within each section. Empty sections are
+hidden; starred conversations appear only in Starred. Sidebar headings are
+skipped by keyboard navigation and stay visible when scrolling within a section.
+`channels --json` remains a flat array and includes `is_starred: true` when known.
+
+Starred uses the optional `is_starred` field when Slack includes it in
+[`users.conversations`](https://docs.slack.dev/reference/methods/users.conversations/).
+That endpoint returns limited conversation objects and may omit the flag, so the
+Starred section can be incomplete or absent. There are no extra per-conversation
+API requests or new scopes. Slack's documented Web API does not expose custom
+sidebar section names or assignments. The deprecated `stars.list` saved-items
+API is not used. Reopen slkt to reload directory metadata.
+
 ## TUI keys
 
 | Key | Action |

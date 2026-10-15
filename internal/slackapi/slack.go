@@ -3,9 +3,13 @@ package slackapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Jarsefax/slakt/internal/core"
@@ -27,14 +31,20 @@ func New(token TokenSource) *Backend {
 // request retries only reads. Writes with a lost response must be checked in
 // Slack before a human retries; a network error does not mean a message failed.
 func request[T any](ctx context.Context, b *Backend, method string, read bool, fn func(*slack.Client) (T, error)) (T, error) {
+	return requestWithToken(ctx, b, method, read, func(token string) (T, error) {
+		client := slack.New(token, slack.OptionHTTPClient(b.HTTP), slack.OptionAPIURL(b.APIURL))
+		return fn(client)
+	})
+}
+
+func requestWithToken[T any](ctx context.Context, b *Backend, method string, read bool, fn func(string) (T, error)) (T, error) {
 	var zero T
 	for attempt := 0; ; attempt++ {
 		token, err := b.Token(ctx)
 		if err != nil {
 			return zero, err
 		}
-		client := slack.New(token, slack.OptionHTTPClient(b.HTTP), slack.OptionAPIURL(b.APIURL))
-		value, err := fn(client)
+		value, err := fn(token)
 		if err == nil {
 			return value, nil
 		}
@@ -129,13 +139,48 @@ func (b *Backend) Conversations(ctx context.Context, cursor string) ([]core.Conv
 		items  []core.Conversation
 		cursor string
 	}
-	r, err := request(ctx, b, "users.conversations", true, func(api *slack.Client) (page, error) {
-		channels, next, err := api.GetConversationsForUserContext(ctx, &slack.GetConversationsForUserParameters{Cursor: cursor, Limit: 200, ExcludeArchived: true, Types: []string{"public_channel", "private_channel", "im", "mpim"}})
-		items := make([]core.Conversation, 0, len(channels))
-		for _, c := range channels {
-			items = append(items, conversation(c))
+	r, err := requestWithToken(ctx, b, "users.conversations", true, func(token string) (page, error) {
+		// slack-go's Channel drops is_starred. Decode this read here so the
+		// optional flag survives, without a separate info request per channel.
+		values := url.Values{"cursor": {cursor}, "limit": {"200"}, "exclude_archived": {"true"}, "types": {"public_channel,private_channel,im,mpim"}}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.APIURL+"users.conversations", strings.NewReader(values.Encode()))
+		if err != nil {
+			return page{}, err
 		}
-		return page{items, next}, err
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response, err := b.HTTP.Do(req)
+		if err != nil {
+			return page{}, err
+		}
+		defer response.Body.Close()
+		if response.StatusCode == http.StatusTooManyRequests {
+			retry, _ := strconv.Atoi(response.Header.Get("Retry-After"))
+			return page{}, &slack.RateLimitedError{RetryAfter: time.Duration(retry) * time.Second}
+		}
+		if response.StatusCode != http.StatusOK {
+			return page{}, slack.StatusCodeError{Code: response.StatusCode, Status: response.Status}
+		}
+		var result struct {
+			slack.SlackResponse
+			Channels []struct {
+				slack.Channel
+				IsStarred bool `json:"is_starred"`
+			} `json:"channels"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+			return page{}, err
+		}
+		if err := result.Err(); err != nil {
+			return page{}, err
+		}
+		items := make([]core.Conversation, 0, len(result.Channels))
+		for _, c := range result.Channels {
+			item := conversation(c.Channel)
+			item.IsStarred = c.IsStarred
+			items = append(items, item)
+		}
+		return page{items, result.ResponseMetadata.Cursor}, nil
 	})
 	return r.items, r.cursor, err
 }

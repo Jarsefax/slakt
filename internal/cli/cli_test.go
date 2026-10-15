@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/Jarsefax/slakt/internal/core"
 )
 
 func run(t *testing.T, args ...string) (string, error) {
@@ -51,6 +53,29 @@ func TestOfflineCLICommands(t *testing.T) {
 				t.Fatalf("output=%s err=%v", out, err)
 			}
 		})
+	}
+}
+
+func TestChannelsGroupTextAndKeepJSONFlat(t *testing.T) {
+	out, err := run(t, "--demo", "channels")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := -1
+	for _, heading := range []string{"Starred\n", "Channels\n", "Direct messages\n", "Group messages\n"} {
+		position := strings.Index(out, heading)
+		if position <= previous {
+			t.Fatalf("missing or misplaced %q: %s", heading, out)
+		}
+		previous = position
+	}
+	if strings.Count(out, "#engineering") != 1 {
+		t.Fatalf("starred conversation was duplicated: %s", out)
+	}
+	out, err = run(t, "--demo", "channels", "--json")
+	var conversations []core.Conversation
+	if err != nil || json.Unmarshal([]byte(out), &conversations) != nil || len(conversations) == 0 || !conversations[0].IsStarred {
+		t.Fatalf("flat JSON or starred metadata was lost: %s, %v", out, err)
 	}
 }
 

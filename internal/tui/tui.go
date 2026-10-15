@@ -189,6 +189,12 @@ func (m *model) switchTo(c core.Conversation) tea.Cmd {
 	m.thread = nil
 	m.searchActive = false
 	m.sidebar = false
+	for i, candidate := range m.conversations {
+		if candidate.ID == c.ID {
+			m.sideIndex = i
+			break
+		}
+	}
 	m.main = view{conversation: c, loading: true, generation: m.main.generation + 1, viewport: viewport.New(60, 15)}
 	m.restoreDraft()
 	m.status = "Loading " + c.Label() + "…"
@@ -562,6 +568,7 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !found {
 			m.conversations = append(m.conversations, msg.conversation)
+			core.SortConversations(m.conversations)
 		}
 		return m, m.switchTo(msg.conversation)
 	case editorResult:
@@ -701,6 +708,14 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.prompt("search", "Search Slack…")
 	case "tab":
 		m.sidebar = !m.sidebar
+		if m.sidebar {
+			for i, c := range m.conversations {
+				if c.ID == m.main.conversation.ID {
+					m.sideIndex = i
+					break
+				}
+			}
+		}
 		return m, nil
 	case "esc":
 		m.saveDraft()
@@ -908,12 +923,20 @@ func separator(width int) string {
 
 func (m model) sidebarView(width, height int) string {
 	lines := []string{muted.Render("  CONVERSATIONS"), separator(width)}
-	start := 0
-	if m.sideIndex > height-5 {
-		start = m.sideIndex - height + 5
+	type row struct {
+		text, section string
+		heading       bool
 	}
-	for i := start; i < len(m.conversations) && len(lines) < height; i++ {
-		c := m.conversations[i]
+	var rows []row
+	section, selectedRow := "", 0
+	for i, c := range m.conversations {
+		if c.Section() != section {
+			section = c.Section()
+			rows = append(rows, row{text: muted.Bold(true).Render(fit("  "+section, width-2)), section: section, heading: true})
+		}
+		if m.sidebar && i == m.sideIndex || !m.sidebar && c.ID == m.main.conversation.ID {
+			selectedRow = len(rows)
+		}
 		prefix := "  "
 		if c.ID == m.main.conversation.ID {
 			prefix = "› "
@@ -924,7 +947,15 @@ func (m model) sidebarView(width, height int) string {
 		} else if c.ID == m.main.conversation.ID {
 			label = accent.Render(label)
 		}
-		lines = append(lines, label)
+		rows = append(rows, row{text: label, section: section})
+	}
+	// Leave room for a repeated section heading when scrolling into a group.
+	start := max(0, selectedRow-(height-len(lines))+2)
+	if start < len(rows) && start > 0 && !rows[start].heading {
+		lines = append(lines, muted.Bold(true).Render(fit("  "+rows[start].section, width-2)))
+	}
+	for i := start; i < len(rows) && len(lines) < height; i++ {
+		lines = append(lines, rows[i].text)
 	}
 	return lipgloss.NewStyle().Width(width).Height(height).BorderStyle(lipgloss.NormalBorder()).BorderRight(true).BorderForeground(borderColor).Render(strings.Join(lines, "\n"))
 }

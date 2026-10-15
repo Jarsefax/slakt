@@ -42,6 +42,40 @@ func TestDirectoryPaginationAndAmbiguity(t *testing.T) {
 	}
 }
 
+func TestConversationSectionsAndOrdering(t *testing.T) {
+	conversations := []core.Conversation{
+		{ID: "GDM", Name: "Alice, Sam", Kind: "group-dm"},
+		{ID: "C2", Name: "Beta", Kind: "channel"},
+		{ID: "D1", Name: "alice", Kind: "dm"},
+		{ID: "G1", Name: "alpha", Kind: "private"},
+		{ID: "DSTAR", Name: "zoe", Kind: "dm", IsStarred: true},
+		{ID: "CSTAR", Name: "Release", Kind: "channel", IsStarred: true},
+		{ID: "C1", Name: "alpha", Kind: "channel"},
+	}
+	core.SortConversations(conversations)
+	wantIDs := []string{"CSTAR", "DSTAR", "C1", "G1", "C2", "D1", "GDM"}
+	wantSections := []string{"Starred", "Starred", "Channels", "Channels", "Channels", "Direct messages", "Group messages"}
+	for i, c := range conversations {
+		if c.ID != wantIDs[i] || c.Section() != wantSections[i] {
+			t.Errorf("position %d: %+v in %q; want %s in %q", i, c, c.Section(), wantIDs[i], wantSections[i])
+		}
+	}
+	if conversations[1].Kind != "dm" || conversations[1].Label() != "@zoe" || conversations[3].Kind != "private" {
+		t.Fatal("grouping changed conversation types or labels")
+	}
+}
+
+func TestDirectoryRetainsStarredMetadataInCache(t *testing.T) {
+	s := core.New(demo.New())
+	for _, refresh := range []bool{true, false} {
+		conversations, _, err := s.Directory(context.Background(), refresh)
+		if err != nil || len(conversations) == 0 || conversations[0].ID != "CENGINEERING" || !conversations[0].IsStarred {
+			t.Fatalf("directory refresh=%v: %+v, %v", refresh, conversations, err)
+		}
+		conversations[0].IsStarred = false
+	}
+}
+
 func TestMessageReferencesDistinguishReplyFromThread(t *testing.T) {
 	link := "https://work.slack.com/archives/C0123/p1720000000000002?thread_ts=1720000000.000001&cid=C0123"
 	channel, ts, err := core.ParseMessageRef(link)

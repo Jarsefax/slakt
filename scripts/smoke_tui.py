@@ -47,7 +47,13 @@ def main():
         return read()
 
     try:
-        assert "OFFLINE DEMO" in read(1), "initial demo frame missing"
+        initial = read(1)
+        assert "OFFLINE DEMO" in initial, "initial demo frame missing"
+        for section in ("Starred", "Channels", "Direct messages", "Group messages"):
+            assert section in initial, f"sidebar section missing: {section}"
+        send(b"\t")
+        send(b"j")
+        assert "#general" in send(b"\r"), "sidebar navigation selected a heading"
         send(b"\x0b")  # Ctrl+k
         send(b"general")
         send(b"\r")
@@ -83,7 +89,7 @@ def main():
         send(b"?")
         send(b"q")
         assert process.wait(timeout=3) == 0, "TUI exited unsuccessfully"
-        print("PASS: channel jump, thread send with emoji, search/result thread, DM send, resize, help, quit (offline PTY)")
+        print("PASS: grouped sidebar/navigation, channel jump, thread send with emoji, search/result thread, DM send, resize, help, quit (offline PTY)")
     finally:
         if process.poll() is None:
             process.terminate()

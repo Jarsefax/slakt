@@ -21,10 +21,45 @@ type Identity struct {
 }
 
 type Conversation struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Kind   string `json:"kind"`
-	UserID string `json:"user_id,omitempty"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	UserID    string `json:"user_id,omitempty"`
+	IsStarred bool   `json:"is_starred,omitempty"`
+}
+
+// Section uses only metadata returned by Slack. Starred conversations appear
+// once, ahead of their usual conversation type.
+func (c Conversation) Section() string {
+	return []string{"Starred", "Channels", "Direct messages", "Group messages"}[c.sectionOrder()]
+}
+
+func (c Conversation) sectionOrder() int {
+	if c.IsStarred {
+		return 0
+	}
+	switch c.Kind {
+	case "dm":
+		return 2
+	case "group-dm":
+		return 3
+	default:
+		return 1
+	}
+}
+
+// SortConversations orders sections and sorts names within each section.
+func SortConversations(conversations []Conversation) {
+	sort.Slice(conversations, func(i, j int) bool {
+		a, b := conversations[i], conversations[j]
+		if a.sectionOrder() != b.sectionOrder() {
+			return a.sectionOrder() < b.sectionOrder()
+		}
+		if an, bn := strings.ToLower(a.Name), strings.ToLower(b.Name); an != bn {
+			return an < bn
+		}
+		return a.ID < b.ID
+	})
 }
 
 func (c Conversation) Label() string {
@@ -159,12 +194,7 @@ func (s *Service) Directory(ctx context.Context, refresh bool) ([]Conversation, 
 			c.Name = c.ID
 		}
 	}
-	sort.Slice(conversations, func(i, j int) bool {
-		if conversations[i].Kind != conversations[j].Kind {
-			return conversations[i].Kind < conversations[j].Kind
-		}
-		return conversations[i].Name < conversations[j].Name
-	})
+	SortConversations(conversations)
 	s.conversations, s.users, s.loaded = conversations, users, time.Now()
 	return append([]Conversation(nil), conversations...), append([]User(nil), users...), nil
 }

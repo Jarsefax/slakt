@@ -22,7 +22,7 @@ type Backend struct {
 
 func New() *Backend {
 	b := &Backend{
-		conversations: []core.Conversation{{ID: "CGENERAL", Name: "general", Kind: "channel"}, {ID: "CENGINEERING", Name: "engineering", Kind: "channel"}, {ID: "CRANDOM", Name: "random", Kind: "channel"}, {ID: "CPRIVATE", Name: "release-room", Kind: "private"}, {ID: "DALICE", Name: "alice", Kind: "dm", UserID: "UALICE"}},
+		conversations: []core.Conversation{{ID: "CGENERAL", Name: "general", Kind: "channel"}, {ID: "CENGINEERING", Name: "engineering", Kind: "channel", IsStarred: true}, {ID: "CRANDOM", Name: "random", Kind: "channel"}, {ID: "CPRIVATE", Name: "release-room", Kind: "private"}, {ID: "DALICE", Name: "alice", Kind: "dm", UserID: "UALICE"}, {ID: "GRELEASE", Name: "alice, sam", Kind: "group-dm"}},
 		users:         []core.User{{ID: "UYOU", Name: "you", DisplayName: "You"}, {ID: "UALICE", Name: "alice", DisplayName: "Alice"}, {ID: "USAM", Name: "sam", DisplayName: "Sam"}},
 		history:       map[string][]core.Message{}, threads: map[string][]core.Message{},
 	}
@@ -44,6 +44,7 @@ func New() *Backend {
 	add("CRANDOM", "USAM", "Small tools. Quiet terminals. Good coffee. :coffee:", 4)
 	add("CPRIVATE", "UALICE", "Private conversation history appears alongside your joined channels.", 5)
 	add("DALICE", "UALICE", "Hey! Want to try replying from the terminal?", 6)
+	add("GRELEASE", "USAM", "Let's coordinate the release here.", 7)
 	return b
 }
 

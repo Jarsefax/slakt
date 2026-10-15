@@ -152,7 +152,15 @@ func New(version string) *cobra.Command {
 		if o.json {
 			return writeJSON(cmd.OutOrStdout(), channels)
 		}
+		section := ""
 		for _, c := range channels {
+			if c.Section() != section {
+				if section != "" {
+					fmt.Fprintln(cmd.OutOrStdout())
+				}
+				section = c.Section()
+				fmt.Fprintln(cmd.OutOrStdout(), section)
+			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%-16s %-11s %s\n", render.Safe(c.ID), render.Safe(c.Kind), render.Safe(c.Label()))
 		}
 		return nil
