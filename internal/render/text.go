@@ -78,7 +78,8 @@ func Time(ts string) string {
 	return time.Unix(n, 0).Local().Format("Jan 02 15:04")
 }
 
-func Message(m core.Message, names map[string]string) string {
+// Author resolves the display name at the terminal boundary.
+func Author(m core.Message, names map[string]string) string {
 	user := m.User
 	if user == "" {
 		user = names[m.UserID]
@@ -89,12 +90,23 @@ func Message(m core.Message, names map[string]string) string {
 	if user == "" {
 		user = "app"
 	}
+	return Safe(user)
+}
+
+func Message(m core.Message, names map[string]string) string {
 	var out strings.Builder
-	fmt.Fprintf(&out, "%s  %s", Time(m.Timestamp), Safe(user))
+	fmt.Fprintf(&out, "%s  %s", Time(m.Timestamp), Author(m, names))
 	if m.ReplyCount > 0 {
 		fmt.Fprintf(&out, "  ↳ %d replies", m.ReplyCount)
 	}
-	out.WriteString("\n" + Text(m.Text, names))
+	out.WriteString("\n" + MessageBody(m, names))
+	return out.String()
+}
+
+// MessageBody renders text, attachments, and reactions without header metadata.
+func MessageBody(m core.Message, names map[string]string) string {
+	var out strings.Builder
+	out.WriteString(Text(m.Text, names))
 	for _, a := range m.Attachments {
 		out.WriteString("\n│ " + Text(a, names))
 	}

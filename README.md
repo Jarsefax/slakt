@@ -174,7 +174,7 @@ API is not used. Reopen slkt to reload directory metadata.
 | `g/G` | First/last loaded message |
 | `Enter` | Open a thread or search result |
 | `i` | Compose; Enter inserts a newline |
-| `Ctrl+s` | Send the draft |
+| `Ctrl+s` | Send the draft; return to browsing on success |
 | `Ctrl+e` | Edit draft with `$VISUAL`, `$EDITOR`, or `vi` |
 | `Esc` | Save draft in this session / close thread or search |
 | `/` | Search |
@@ -183,10 +183,30 @@ API is not used. Reopen slkt to reload directory metadata.
 | `o` | Open selected message in Slack |
 | `R` | Reload current conversation |
 | `?` | Keybinding guide |
-| `q`, `Ctrl+c` | Quit (use Ctrl+c while composing) |
+| `q` | Quit outside text entry, including help and pending operations |
+| `Ctrl+c` | Quit in any TUI mode |
+
+Text entry starts only when you press `i`, `/`, `Ctrl+k`, or `r`. Opening a channel
+or thread, restoring a saved draft, refreshing, and resizing never activate an
+input. Text-entry modes are labeled **COMPOSE**, **SEARCH**, **JUMP**, or **REACT**.
+Successful sends return to browsing; failed sends keep the draft open for retry.
+While an input is active, `q` is ordinary text and `Ctrl+c` still quits. To leave
+text entry and quit, press `Esc`, then `q`; the terminal's combined `Alt+q`
+encoding for this sequence is accepted too. Pasted text never activates commands.
 
 Threads appear alongside the timeline on wide terminals and replace it on narrow
-ones. The minimum size is 40×15. Destinations and thread context remain visible
+ones. Messages use Vim-style hybrid numbering: the selected message shows its
+1-based position in the loaded list, and other messages show their distance from
+the selection. Each pane numbers its own list, including the parent in a thread;
+wrapped lines have no extra numbers. Positions can change when older history is
+loaded or cached messages are evicted. Numeric keyboard commands are deferred.
+
+Messages with replies show a separate **↳ Thread · N replies** row; replies
+shown in the channel or search show **↳ In thread** when no count is available.
+The footer distinguishes **Enter: open thread** from **Enter: start thread**.
+Confirmed replies update the visible parent indicator immediately.
+
+The minimum size is 40×15. Destinations and thread context remain visible
 while writing. Drafts are separate per conversation/thread and survive navigation
 within the session. External editors receive a private temporary file; editor
 commands accept an executable and whitespace-separated arguments, without shell

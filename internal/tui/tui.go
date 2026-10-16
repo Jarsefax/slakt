@@ -328,28 +328,45 @@ func (m *model) rebuild(v *view, anchor bool) {
 	v.viewport.Width, v.viewport.Height = width, height
 	var lines []string
 	v.starts = nil
+	// Reserve three digits for the 500-message cache, keeping text aligned as
+	// selection and pagination change the displayed numbers.
+	digits := max(3, len(fmt.Sprint(len(v.messages))))
+	gutterWidth := digits + 3
+	textWidth := max(1, width-gutterWidth)
 	for i, msg := range v.messages {
 		v.starts = append(v.starts, len(lines))
-		prefix := "  "
+		number := max(i-v.selected, v.selected-i)
+		marker := "  "
+		numberStyle := muted
 		style := messageStyle
-		authorStyle, metadataStyle := accent.Bold(true), muted
+		authorStyle, metadataStyle, threadStyle := accent.Bold(true), muted, accent.Bold(true)
 		if i == v.selected {
-			prefix = selectionMarker.Background(selectedStyle.GetBackground()).Render("▎ ")
-			style = selectedStyle.Width(width - 2)
+			number = i + 1
+			marker = selectionMarker.Background(selectedStyle.GetBackground()).Render("▎ ")
+			numberStyle = selectionMarker.Background(selectedStyle.GetBackground())
+			style = selectedStyle.Width(textWidth)
 			// Each header segment needs the background too: its ANSI reset
 			// otherwise interrupts the enclosing selection style.
 			authorStyle = authorStyle.Background(selectedStyle.GetBackground())
 			metadataStyle = metadataStyle.Background(selectedStyle.GetBackground())
+			threadStyle = threadStyle.Background(selectedStyle.GetBackground())
 		}
-		header, body, _ := strings.Cut(render.Message(msg, m.names), "\n")
-		timestamp, author, _ := strings.Cut(header, "  ")
-		header = authorStyle.Render(author) + metadataStyle.Render("  "+timestamp)
+		header := authorStyle.Render(render.Author(msg, m.names)) + metadataStyle.Render("  "+render.Time(msg.Timestamp))
 		if m.searchActive && v == &m.search {
 			header = authorStyle.Render(render.Safe(msg.ChannelID)) + metadataStyle.Render(" · ") + header
 		}
-		body = ansi.Wrap(header+"\n"+body, max(10, width-3), "")
-		for _, line := range strings.Split(body, "\n") {
-			lines = append(lines, prefix+style.Render(line))
+		body := header + "\n" + render.MessageBody(msg, m.names)
+		if v.thread == "" {
+			if indicator := threadIndicator(msg); indicator != "" {
+				body += "\n" + threadStyle.Render(indicator)
+			}
+		}
+		for row, line := range strings.Split(ansi.Wrap(body, textWidth, ""), "\n") {
+			gutter := strings.Repeat(" ", digits+1)
+			if row == 0 {
+				gutter = numberStyle.Render(fmt.Sprintf("%*d ", digits, number))
+			}
+			lines = append(lines, gutter+marker+style.Render(line))
 		}
 		if i+1 < len(v.messages) {
 			lines = append(lines, separator(width))
@@ -362,6 +379,20 @@ func (m *model) rebuild(v *view, anchor bool) {
 	if anchor && v.selected < len(v.starts) {
 		v.viewport.SetYOffset(max(0, v.starts[v.selected]+delta))
 	}
+}
+
+func threadIndicator(msg core.Message) string {
+	if msg.ReplyCount > 0 {
+		replies := "replies"
+		if msg.ReplyCount == 1 {
+			replies = "reply"
+		}
+		return fmt.Sprintf("↳ Thread · %d %s", msg.ReplyCount, replies)
+	}
+	if msg.ThreadTS != "" && msg.ThreadTS != msg.Timestamp {
+		return "↳ In thread"
+	}
+	return ""
 }
 
 func (m *model) reveal(v *view) {
@@ -511,9 +542,14 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.sending = false
 		if msg.err != nil {
 			m.status = msg.err.Error()
+			if m.mode == "compose" {
+				return m, m.composer.Focus()
+			}
 			return m, nil
 		}
 		delete(m.drafts, draftKey(msg.channel, msg.thread))
+		m.mode = ""
+		m.composer.Blur()
 		m.composer.Reset()
 		v := &m.main
 		if msg.thread != "" {
@@ -525,6 +561,21 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			v.selected = max(0, len(v.messages)-1)
 			m.rebuild(v, false)
 			m.reveal(v)
+		}
+		if msg.thread != "" {
+			for _, visible := range []*view{&m.main, &m.search, m.thread} {
+				if visible == nil {
+					continue
+				}
+				for i, parent := range visible.messages {
+					if parent.ChannelID == msg.channel && parent.Timestamp == msg.thread {
+						visible.messages = append([]core.Message(nil), visible.messages...)
+						visible.messages[i].ReplyCount++
+						m.rebuild(visible, true)
+						break
+					}
+				}
+			}
 		}
 		m.status = "Message sent"
 	case actionResult:
@@ -596,16 +647,58 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) enteringText() bool {
+	return m.mode != "" && !m.help && !m.sending && m.width >= 40 && m.height >= 15
+}
+
+func (m model) isQuitKey(key tea.KeyMsg) bool {
+	if key.Paste {
+		return false
+	}
+	switch key.String() {
+	case "ctrl+c", "alt+q":
+		// A terminal may encode a rapid Escape, q as Alt+q.
+		return true
+	case "q":
+		return !m.enteringText()
+	}
+	return false
+}
+
 func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	k := key.String()
-	if k == "ctrl+c" {
+	// The terminal can deliver several typed characters in one event. Dispatch
+	// commands in order, then pass the remaining text intact to an explicitly
+	// opened input. Pasted text must never activate commands.
+	if key.Type == tea.KeyRunes && !key.Alt && !key.Paste && len(key.Runes) > 1 && !m.enteringText() {
+		var cmds []tea.Cmd
+		for i, r := range key.Runes {
+			if m.enteringText() {
+				key.Runes = key.Runes[i:]
+				updated, cmd := m.handleKey(key)
+				return updated, tea.Batch(append(cmds, cmd)...)
+			}
+			single := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+			if m.isQuitKey(single) {
+				return m, tea.Quit
+			}
+			updated, cmd := m.handleKey(single)
+			m = updated.(model)
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
+	}
+	if m.isQuitKey(key) {
 		return m, tea.Quit
 	}
+	if m.width < 40 || m.height < 15 {
+		return m, nil
+	}
+	k := key.String()
 	if m.sending {
 		return m, nil
 	}
 	if m.help {
-		if k == "?" || k == "esc" || k == "q" {
+		if k == "?" || k == "esc" {
 			m.help = false
 		}
 		_, width, height := m.dimensions()
@@ -634,6 +727,7 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.sending = true
+			m.composer.Blur()
 			m.saveDraft()
 			m.status = "Sending…"
 			return m, func() tea.Msg {
@@ -707,8 +801,6 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	switch k {
-	case "q":
-		return m, tea.Quit
 	case "?":
 		m.help = true
 		m.helpOffset = 0
@@ -1016,7 +1108,7 @@ func pane(v view, width, height int, label string) string {
 }
 
 func helpLines(width int) []string {
-	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open thread/search result\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message in Slack\nn         Next history/search page\nR         Reload conversation\nq Ctrl+c  Quit\n\nUpdates use polling. Drafts live only in this process."
+	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message in Slack\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry starts only with i, /, Ctrl+k, or r.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n\nUpdates use polling. Drafts live only in this process."
 	return strings.Split(ansi.Wrap(text, max(20, width-2), ""), "\n")
 }
 
@@ -1070,9 +1162,13 @@ func (m model) View() string {
 		if v.thread != "" {
 			context += " / thread"
 		}
-		bottom = accent.Render(fit(" To "+context+" · Ctrl+s send · Esc browse · Ctrl+e editor", m.width)) + "\n" + m.composer.View()
+		label := " COMPOSE · To " + context + " · Ctrl+s send · Esc browse · Ctrl+c quit · Ctrl+e editor"
+		if m.sending {
+			label = " SENDING · To " + context + " · q / Ctrl+c quit"
+		}
+		bottom = accent.Render(fit(label, m.width)) + "\n" + m.composer.View()
 	case "jump", "search", "react":
-		bottom = ansi.Truncate(accent.Render(" "+m.mode+" › ")+m.input.View(), m.width, "…")
+		bottom = ansi.Truncate(accent.Render(" "+strings.ToUpper(m.mode)+" › ")+m.input.View(), m.width, "…")
 		if m.mode == "jump" {
 			choices := m.choices(m.input.Value())
 			index := min(m.sideIndex, max(0, len(choices)-1))
@@ -1088,13 +1184,26 @@ func (m model) View() string {
 			bottom += "\n" + muted.Render(" Enter to confirm · Esc cancel")
 		}
 	default:
-		bottom = muted.Render(fit(" i compose   Enter thread   Ctrl+k jump   / search   ? help   q quit", m.width))
+		action := ""
+		v := m.active()
+		switch {
+		case m.sidebar:
+			action = "Enter: open conversation  "
+		case m.thread != nil:
+			action = "Esc: back  "
+		case len(v.messages) > 0:
+			action = "Enter: start thread  "
+			if threadIndicator(v.messages[v.selected]) != "" {
+				action = "Enter: open thread  "
+			}
+		}
+		bottom = muted.Render(fit(" q quit  i compose  "+action+"Ctrl+k jump  / search  ? help", m.width))
 		if draft := m.drafts[draftKey(m.main.conversation.ID, "")]; draft != "" {
 			bottom += "\n" + accent.Render(fit(" Draft saved for this conversation · i to continue", m.width))
 		}
 	}
 	if m.help {
-		bottom = muted.Render(fit(" ↑/↓ scroll · ? or Esc close help", m.width))
+		bottom = muted.Render(fit(" q quit · ↑/↓ scroll · ?/Esc back", m.width))
 	}
 	status := muted.Render(" "+fit(m.status, m.width-3)) + "\n" + muted.Render(fit(fmt.Sprintf(" polling every %s · %s", m.options.PollInterval, m.identity.User), m.width))
 	return header + "\n" + separator(m.width) + "\n" + body + "\n" + separator(m.width) + "\n" + bottom + "\n" + status

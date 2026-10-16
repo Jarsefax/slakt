@@ -36,6 +36,14 @@ func key(m model, k string) (model, tea.Cmd) {
 		msg.Type = tea.KeyEnter
 	case "ctrl+s":
 		msg.Type = tea.KeyCtrlS
+	case "ctrl+c":
+		msg.Type = tea.KeyCtrlC
+	case "ctrl+k":
+		msg.Type = tea.KeyCtrlK
+	case "alt+q":
+		msg.Type = tea.KeyRunes
+		msg.Runes = []rune{'q'}
+		msg.Alt = true
 	case "tab":
 		msg.Type = tea.KeyTab
 	default:
@@ -188,14 +196,154 @@ func TestIncomingMessagesKeepSelectionAndIgnoreStaleResponses(t *testing.T) {
 	}
 }
 
+func assertMessageNumbers(t *testing.T, v view, want []string) {
+	t.Helper()
+	v.viewport.Height = v.viewport.TotalLineCount()
+	v.viewport.SetYOffset(0)
+	lines := strings.Split(ansi.Strip(v.viewport.View()), "\n")
+	if len(v.starts) != len(want) {
+		t.Fatalf("got %d message starts, want %d", len(v.starts), len(want))
+	}
+	for i, start := range v.starts {
+		fields := strings.Fields(lines[start])
+		if len(fields) == 0 || fields[0] != want[i] {
+			t.Fatalf("message %d: header %q, want number %s", i, lines[start], want[i])
+		}
+		if strings.Contains(lines[start], "▎") != (i == v.selected) {
+			t.Fatalf("message %d has incorrect selection marker: %q", i, lines[start])
+		}
+		if !strings.HasPrefix(lines[start+1], "    ") {
+			t.Fatalf("message %d body has a numbered gutter: %q", i, lines[start+1])
+		}
+	}
+}
+
+func TestHybridMessageNumbersFollowSelectionInEachPane(t *testing.T) {
+	m := loadedModel(t)
+	m.main.messages = []core.Message{
+		{Timestamp: "2.000001", User: "Alice", Text: "Ready."},
+		{Timestamp: "3.000001", User: "Sam", Text: "Checking.\nOne more line."},
+		{Timestamp: "4.000001", User: "Roger", Text: "Looks good."},
+	}
+	m.main.selected = 1
+	m.rebuild(&m.main, false)
+	assertMessageNumbers(t, m.main, []string{"1", "2", "1"})
+	m, _ = key(m, "j")
+	assertMessageNumbers(t, m.main, []string{"2", "1", "3"})
+	m, _ = key(m, "g")
+	assertMessageNumbers(t, m.main, []string{"1", "1", "2"})
+
+	m.width = 140
+	m.thread = &view{thread: "2.000001", messages: m.main.messages, viewport: m.main.viewport, selected: 1}
+	m.rebuild(&m.main, false)
+	m.rebuild(m.thread, false)
+	assertMessageNumbers(t, *m.thread, []string{"1", "2", "1"})
+	assertMessageNumbers(t, m.main, []string{"1", "1", "2"})
+	m, _ = key(m, "j")
+	assertMessageNumbers(t, *m.thread, []string{"2", "1", "3"})
+	assertMessageNumbers(t, m.main, []string{"1", "1", "2"})
+}
+
+func TestHybridNumbersAndScrollAnchorSurvivePaginationAndUpdates(t *testing.T) {
+	m := loadedModel(t)
+	m.height = 15
+	m.main.messages = []core.Message{{Timestamp: "2.000001"}, {Timestamp: "3.000001"}, {Timestamp: "4.000001"}}
+	m.main.selected = 1
+	m.rebuild(&m.main, false)
+	m.main.viewport.SetYOffset(m.main.starts[1] + 1)
+	m.merge(&m.main, []core.Message{{Timestamp: "1.000001"}}, false, true)
+	assertMessageNumbers(t, m.main, []string{"2", "1", "3", "1"})
+	if m.main.messages[m.main.selected].Timestamp != "3.000001" || m.main.viewport.YOffset != m.main.starts[2]+1 {
+		t.Fatal("loading older history moved the selection or scroll anchor")
+	}
+	m.merge(&m.main, []core.Message{{Timestamp: "5.000001"}}, false, false)
+	assertMessageNumbers(t, m.main, []string{"2", "1", "3", "1", "2"})
+	if m.main.viewport.YOffset != m.main.starts[2]+1 {
+		t.Fatal("incoming message moved the scroll anchor")
+	}
+}
+
+func TestThreadIndicatorsAndContextualActions(t *testing.T) {
+	for _, test := range []struct {
+		name, thread, indicator, action string
+		replies                         int
+	}{
+		{name: "no thread", action: "start thread"},
+		{name: "root without replies", thread: "1.000001", action: "start thread"},
+		{name: "one reply", replies: 1, indicator: "↳ Thread · 1 reply", action: "open thread"},
+		{name: "multiple replies", replies: 3, indicator: "↳ Thread · 3 replies", action: "open thread"},
+		{name: "broadcast reply", thread: "0.000001", indicator: "↳ In thread", action: "open thread"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			m := loadedModel(t)
+			m.main.messages = []core.Message{{Timestamp: "1.000001", ThreadTS: test.thread, ReplyCount: test.replies, User: "Alice", Text: "Ready."}}
+			m.main.selected = 0
+			m.rebuild(&m.main, false)
+			m.main.viewport.GotoTop()
+			frame := ansi.Strip(m.main.viewport.View())
+			if test.indicator == "" {
+				if strings.Contains(frame, "↳") {
+					t.Fatalf("unexpected thread indicator: %s", frame)
+				}
+			} else if !strings.Contains(frame, "\n    ▎ "+test.indicator) {
+				t.Fatalf("thread indicator missing from its own row: %s", frame)
+			}
+			if !strings.Contains(ansi.Strip(m.View()), "Enter: "+test.action) {
+				t.Fatalf("incorrect thread action: %s", m.View())
+			}
+		})
+	}
+}
+
+func TestConfirmedReplyUpdatesVisibleParentsWithoutMutatingSnapshots(t *testing.T) {
+	for _, parentIndex := range []int{0, 2} {
+		t.Run(fmt.Sprint(parentIndex), func(t *testing.T) {
+			m := loadedModel(t)
+			cmd := m.switchTo(core.Conversation{ID: "CGENERAL", Name: "general", Kind: "channel"})
+			mm, _ := m.Update(cmd())
+			m = mm.(model)
+			m.main.selected = parentIndex
+			m.rebuild(&m.main, false)
+			before := m.main.messages[parentIndex].ReplyCount
+			snapshot := m.main.messages
+			m.search.messages = []core.Message{m.main.messages[parentIndex]}
+			searchSnapshot := m.search.messages
+			m, cmd = key(m, "enter")
+			mm, _ = m.Update(cmd())
+			m = mm.(model)
+			m, _ = key(m, "i")
+			m, _ = key(m, "reply")
+			m, cmd = key(m, "ctrl+s")
+			mm, _ = m.Update(cmd())
+			m = mm.(model)
+			if m.main.messages[parentIndex].ReplyCount != before+1 || m.search.messages[0].ReplyCount != before+1 {
+				t.Fatal("confirmed reply did not update the visible parent counts")
+			}
+			if snapshot[parentIndex].ReplyCount != before || searchSnapshot[0].ReplyCount != before {
+				t.Fatal("reply changed a previous message snapshot")
+			}
+			m, _ = key(m, "esc")
+			m, _ = key(m, "esc")
+			m.reveal(&m.main)
+			frame := ansi.Strip(m.View())
+			if !strings.Contains(frame, fmt.Sprintf("↳ Thread · %d", before+1)) || !strings.Contains(frame, "Enter: open thread") {
+				t.Fatalf("parent still looks like it has no thread: %s", frame)
+			}
+		})
+	}
+}
+
 func TestSendFailureKeepsDraftAndSuccessClearsIt(t *testing.T) {
 	m := loadedModel(t)
 	m, _ = key(m, "i")
 	m, _ = key(m, "hello")
-	m.sending = true
+	m, _ = key(m, "ctrl+s")
+	if !m.sending || m.composer.Focused() || m.enteringText() {
+		t.Fatal("pending send still accepts text entry")
+	}
 	mm, _ := m.Update(sentResult{err: fmt.Errorf("outcome unknown; check Slack")})
 	m = mm.(model)
-	if m.composer.Value() != "hello" || m.sending || !strings.Contains(m.status, "unknown") {
+	if m.composer.Value() != "hello" || m.sending || m.mode != "compose" || !m.composer.Focused() || !strings.Contains(m.status, "unknown") {
 		t.Fatal("failed send lost the draft")
 	}
 	var send tea.Cmd
@@ -208,6 +356,11 @@ func TestSendFailureKeepsDraftAndSuccessClearsIt(t *testing.T) {
 	if m.composer.Value() != "" || m.drafts[draftKey(m.main.conversation.ID, "")] != "" {
 		t.Fatal("successful send did not clear the draft")
 	}
+	if m.mode != "" || m.composer.Focused() {
+		t.Fatal("successful send did not return to browsing")
+	}
+	_, quit := key(m, "q")
+	assertQuit(t, quit)
 }
 
 type gapBackend struct {
@@ -277,7 +430,7 @@ func TestConfirmedReactionAppearsWithoutMutatingSnapshots(t *testing.T) {
 
 func TestFramesFitTerminal(t *testing.T) {
 	for _, size := range [][2]int{{40, 15}, {79, 24}, {80, 24}, {125, 30}, {126, 30}, {140, 40}} {
-		for _, mode := range []string{"normal", "help", "compose", "jump", "search-thread"} {
+		for _, mode := range []string{"normal", "help", "compose", "jump", "search-thread", "numbered-thread"} {
 			m := loadedModel(t)
 			mm, _ := m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 			m = mm.(model)
@@ -295,6 +448,16 @@ func TestFramesFitTerminal(t *testing.T) {
 				m.thread = &view{conversation: m.main.conversation, messages: m.main.messages, viewport: m.main.viewport}
 				m.rebuild(&m.search, false)
 				m.rebuild(m.thread, false)
+			case "numbered-thread":
+				m.main.messages = nil
+				for i := range 500 {
+					m.main.messages = append(m.main.messages, core.Message{Timestamp: fmt.Sprintf("%d.000001", i+1), Text: strings.Repeat("👩🏽‍💻 wrapped text ", 4), ReplyCount: 123})
+				}
+				m.main.selected = 499
+				m.thread = &view{thread: "1.000001", messages: m.main.messages, viewport: m.main.viewport, selected: 250}
+				m.rebuild(&m.main, false)
+				m.rebuild(m.thread, false)
+				assertMessageNumbers(t, m.main, append(numberDistances(499), "500"))
 			}
 			frame := m.View()
 			if width, height := lipgloss.Size(frame); width > size[0] || height > size[1] {
@@ -302,6 +465,14 @@ func TestFramesFitTerminal(t *testing.T) {
 			}
 		}
 	}
+}
+
+func numberDistances(from int) []string {
+	var numbers []string
+	for n := from; n > 0; n-- {
+		numbers = append(numbers, fmt.Sprint(n))
+	}
+	return numbers
 }
 
 func TestEmojiMessagesFitTerminal(t *testing.T) {
