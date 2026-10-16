@@ -122,6 +122,23 @@ func TestSidebarHidesEmptySectionsAndGroupsNewDMs(t *testing.T) {
 	}
 }
 
+func TestSidebarScrollAcrossSectionBoundaries(t *testing.T) {
+	m := loadedModel(t)
+	m.sidebar = true
+	for _, height := range []int{6, 8, 12, 20} {
+		for i, conversation := range m.conversations {
+			m.sideIndex = i
+			frame := ansi.Strip(m.sidebarView(22, height))
+			if !strings.Contains(frame, conversation.Label()) || !strings.Contains(frame, conversation.Section()) {
+				t.Fatalf("selection or section missing at index %d, height %d: %s", i, height, frame)
+			}
+			if width, actualHeight := lipgloss.Size(frame); width > 23 || actualHeight > height {
+				t.Fatalf("sidebar overflow at index %d: %dx%d", i, width, actualHeight)
+			}
+		}
+	}
+}
+
 func TestDraftsSurviveConversationSwitchesAndThreadContext(t *testing.T) {
 	m := loadedModel(t)
 	original := m.main.conversation
@@ -259,7 +276,7 @@ func TestConfirmedReactionAppearsWithoutMutatingSnapshots(t *testing.T) {
 }
 
 func TestFramesFitTerminal(t *testing.T) {
-	for _, size := range [][2]int{{40, 15}, {80, 24}, {140, 40}} {
+	for _, size := range [][2]int{{40, 15}, {79, 24}, {80, 24}, {125, 30}, {126, 30}, {140, 40}} {
 		for _, mode := range []string{"normal", "help", "compose", "jump", "search-thread"} {
 			m := loadedModel(t)
 			mm, _ := m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})

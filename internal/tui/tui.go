@@ -20,11 +20,13 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-var accent = lipgloss.NewStyle().Foreground(lipgloss.Color("#C4B5FD"))
-var muted = lipgloss.NewStyle().Foreground(lipgloss.Color("#8B93A6"))
-var titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E8EAF0"))
-var selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#DCD6FF")).Background(lipgloss.Color("#2B2541"))
-var borderColor = lipgloss.Color("#333849")
+var accent = lipgloss.NewStyle().Foreground(lipgloss.Color("#67E8F9"))
+var muted = lipgloss.NewStyle().Foreground(lipgloss.Color("#A7B4CB"))
+var titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F5F7FF"))
+var messageStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#E8EDF7"))
+var selectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#F8FAFC")).Background(lipgloss.Color("#35365E"))
+var selectionMarker = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#D5B3FF"))
+var borderColor = lipgloss.Color("#627390")
 
 type Options struct {
 	Initial      *core.Conversation
@@ -311,8 +313,11 @@ func (m *model) dimensions() (int, int, int) {
 func (m *model) rebuild(v *view, anchor bool) {
 	_, width, height := m.dimensions()
 	if m.thread != nil && m.width >= 125 {
-		if v == &m.main || v == &m.search || v == m.thread {
-			width = (width - 3) / 2
+		left := (width - 3) / 2
+		if v == m.thread {
+			width -= left + 3
+		} else if v == &m.main || v == &m.search {
+			width = left
 		}
 	}
 	oldStart := 0
@@ -326,23 +331,29 @@ func (m *model) rebuild(v *view, anchor bool) {
 	for i, msg := range v.messages {
 		v.starts = append(v.starts, len(lines))
 		prefix := "  "
+		style := messageStyle
+		authorStyle, metadataStyle := accent.Bold(true), muted
 		if i == v.selected {
-			prefix = "▎ "
+			prefix = selectionMarker.Background(selectedStyle.GetBackground()).Render("▎ ")
+			style = selectedStyle.Width(width - 2)
+			// Each header segment needs the background too: its ANSI reset
+			// otherwise interrupts the enclosing selection style.
+			authorStyle = authorStyle.Background(selectedStyle.GetBackground())
+			metadataStyle = metadataStyle.Background(selectedStyle.GetBackground())
 		}
-		body := render.Message(msg, m.names)
+		header, body, _ := strings.Cut(render.Message(msg, m.names), "\n")
+		timestamp, author, _ := strings.Cut(header, "  ")
+		header = authorStyle.Render(author) + metadataStyle.Render("  "+timestamp)
 		if m.searchActive && v == &m.search {
-			body = msg.ChannelID + " · " + body
+			header = authorStyle.Render(render.Safe(msg.ChannelID)) + metadataStyle.Render(" · ") + header
 		}
-		body = ansi.Wrap(body, max(10, width-3), "")
+		body = ansi.Wrap(header+"\n"+body, max(10, width-3), "")
 		for _, line := range strings.Split(body, "\n") {
-			if i == v.selected {
-				lines = append(lines, selectedStyle.Render(prefix+line))
-			} else {
-				lines = append(lines, prefix+line)
-			}
-			prefix = "  "
+			lines = append(lines, prefix+style.Render(line))
 		}
-		lines = append(lines, "")
+		if i+1 < len(v.messages) {
+			lines = append(lines, separator(width))
+		}
 	}
 	if len(lines) == 0 {
 		lines = []string{muted.Render("  No messages yet.")}
@@ -921,18 +932,37 @@ func separator(width int) string {
 	return lipgloss.NewStyle().Foreground(borderColor).Render(strings.Repeat("─", max(0, width)))
 }
 
+func sidebarHeading(section string, width int) string {
+	color := lipgloss.Color("#67E8F9")
+	switch section {
+	case "Starred":
+		color = lipgloss.Color("#FCD34D")
+	case "Direct messages":
+		color = lipgloss.Color("#6EE7B7")
+	case "Group messages":
+		color = lipgloss.Color("#C4B5FD")
+	}
+	label := fit(" "+section+" ", width)
+	label += strings.Repeat("─", max(0, width-ansi.StringWidth(label)))
+	return lipgloss.NewStyle().Bold(true).Foreground(color).Background(lipgloss.Color("#202B40")).Width(width).Render(label)
+}
+
 func (m model) sidebarView(width, height int) string {
-	lines := []string{muted.Render("  CONVERSATIONS"), separator(width)}
+	lines := []string{titleStyle.Render("  CONVERSATIONS"), separator(width)}
 	type row struct {
 		text, section string
 		heading       bool
+		spacer        bool
 	}
 	var rows []row
 	section, selectedRow := "", 0
 	for i, c := range m.conversations {
 		if c.Section() != section {
 			section = c.Section()
-			rows = append(rows, row{text: muted.Bold(true).Render(fit("  "+section, width-2)), section: section, heading: true})
+			if len(rows) > 0 {
+				rows = append(rows, row{section: section, spacer: true})
+			}
+			rows = append(rows, row{text: sidebarHeading(section, width), section: section, heading: true})
 		}
 		if m.sidebar && i == m.sideIndex || !m.sidebar && c.ID == m.main.conversation.ID {
 			selectedRow = len(rows)
@@ -943,21 +973,33 @@ func (m model) sidebarView(width, height int) string {
 		}
 		label := fit(prefix+c.Label(), width-2)
 		if m.sidebar && i == m.sideIndex {
-			label = selectedStyle.Render(label)
+			label = selectedStyle.Width(width).Render(label)
 		} else if c.ID == m.main.conversation.ID {
-			label = accent.Render(label)
+			label = accent.Bold(true).Render(label)
+		} else {
+			label = messageStyle.Render(label)
 		}
 		rows = append(rows, row{text: label, section: section})
 	}
 	// Leave room for a repeated section heading when scrolling into a group.
 	start := max(0, selectedRow-(height-len(lines))+2)
+	if start < len(rows) && rows[start].spacer {
+		start++
+	}
 	if start < len(rows) && start > 0 && !rows[start].heading {
-		lines = append(lines, muted.Bold(true).Render(fit("  "+rows[start].section, width-2)))
+		lines = append(lines, sidebarHeading(rows[start].section, width))
 	}
 	for i := start; i < len(rows) && len(lines) < height; i++ {
+		if (rows[i].heading || rows[i].spacer) && len(lines) == height-1 {
+			break
+		}
 		lines = append(lines, rows[i].text)
 	}
-	return lipgloss.NewStyle().Width(width).Height(height).BorderStyle(lipgloss.NormalBorder()).BorderRight(true).BorderForeground(borderColor).Render(strings.Join(lines, "\n"))
+	border := borderColor
+	if m.sidebar {
+		border = lipgloss.Color("#67E8F9")
+	}
+	return lipgloss.NewStyle().Width(width).Height(height).BorderStyle(lipgloss.NormalBorder()).BorderRight(true).BorderForeground(border).Render(strings.Join(lines, "\n"))
 }
 
 func pane(v view, width, height int, label string) string {
@@ -1007,7 +1049,7 @@ func (m model) View() string {
 		if m.thread != nil && m.width >= 125 {
 			left := (width - 3) / 2
 			right := width - left - 3
-			body = lipgloss.JoinHorizontal(lipgloss.Top, pane(v, left, height, label), muted.Render(" │ "), pane(*m.thread, right, height, "Thread · "+m.thread.conversation.Label()))
+			body = lipgloss.JoinHorizontal(lipgloss.Top, pane(v, left, height, label), accent.Render(" │ "), pane(*m.thread, right, height, "Thread · "+m.thread.conversation.Label()))
 		} else if m.thread != nil {
 			body = pane(*m.thread, width, height, "Thread · "+m.thread.conversation.Label()+" · Esc back")
 		} else {
