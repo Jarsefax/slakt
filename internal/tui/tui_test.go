@@ -218,6 +218,21 @@ func assertMessageNumbers(t *testing.T, v view, want []string) {
 	}
 }
 
+func assertNoMessageNumbers(t *testing.T, v view) {
+	t.Helper()
+	v.viewport.Height = v.viewport.TotalLineCount()
+	v.viewport.SetYOffset(0)
+	lines := strings.Split(ansi.Strip(v.viewport.View()), "\n")
+	for i, start := range v.starts {
+		if !strings.HasPrefix(lines[start], "    ") {
+			t.Fatalf("inactive message %d still has a number: %q", i, lines[start])
+		}
+		if strings.Contains(lines[start], "▎") != (i == v.selected) {
+			t.Fatalf("inactive message %d lost its selection marker: %q", i, lines[start])
+		}
+	}
+}
+
 func TestHybridMessageNumbersFollowSelectionInEachPane(t *testing.T) {
 	m := loadedModel(t)
 	m.main.messages = []core.Message{
@@ -238,10 +253,10 @@ func TestHybridMessageNumbersFollowSelectionInEachPane(t *testing.T) {
 	m.rebuild(&m.main, false)
 	m.rebuild(m.thread, false)
 	assertMessageNumbers(t, *m.thread, []string{"1", "2", "1"})
-	assertMessageNumbers(t, m.main, []string{"1", "1", "2"})
+	assertNoMessageNumbers(t, m.main)
 	m, _ = key(m, "j")
 	assertMessageNumbers(t, *m.thread, []string{"2", "1", "3"})
-	assertMessageNumbers(t, m.main, []string{"1", "1", "2"})
+	assertNoMessageNumbers(t, m.main)
 }
 
 func TestHybridNumbersAndScrollAnchorSurvivePaginationAndUpdates(t *testing.T) {
@@ -457,7 +472,7 @@ func TestFramesFitTerminal(t *testing.T) {
 				m.thread = &view{thread: "1.000001", messages: m.main.messages, viewport: m.main.viewport, selected: 250}
 				m.rebuild(&m.main, false)
 				m.rebuild(m.thread, false)
-				assertMessageNumbers(t, m.main, append(numberDistances(499), "500"))
+				assertNoMessageNumbers(t, m.main)
 			}
 			frame := m.View()
 			if width, height := lipgloss.Size(frame); width > size[0] || height > size[1] {
@@ -465,14 +480,6 @@ func TestFramesFitTerminal(t *testing.T) {
 			}
 		}
 	}
-}
-
-func numberDistances(from int) []string {
-	var numbers []string
-	for n := from; n > 0; n-- {
-		numbers = append(numbers, fmt.Sprint(n))
-	}
-	return numbers
 }
 
 func TestEmojiMessagesFitTerminal(t *testing.T) {

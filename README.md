@@ -197,8 +197,11 @@ encoding for this sequence is accepted too. Pasted text never activates commands
 Threads appear alongside the timeline on wide terminals and replace it on narrow
 ones. Messages use Vim-style hybrid numbering: the selected message shows its
 1-based position in the loaded list, and other messages show their distance from
-the selection. Each pane numbers its own list, including the parent in a thread;
-wrapped lines have no extra numbers. Positions can change when older history is
+the selection. Only the active message list shows numbers, including the parent
+in a thread. Focusing the sidebar or entering text hides numbers in every message
+pane. Inactive selections keep their highlight and marker for context, and the
+blank number gutter keeps wrapping and alignment stable across focus changes.
+Wrapped lines have no extra numbers. Positions can change when older history is
 loaded or cached messages are evicted. Numeric keyboard commands are deferred.
 
 Messages with replies show a separate **↳ Thread · N replies** row; replies

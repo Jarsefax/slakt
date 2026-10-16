@@ -41,6 +41,7 @@ type view struct {
 	selected     int
 	viewport     viewport.Model
 	starts       []int
+	numbered     bool // Number visibility in the cached viewport.
 	cursor       string
 	hasMore      bool
 	loading      bool
@@ -170,6 +171,18 @@ func (m *model) active() *view {
 		return &m.search
 	}
 	return &m.main
+}
+
+func (m *model) numbersVisible(v *view) bool {
+	return !m.sidebar && m.mode == "" && !m.help && v == m.active()
+}
+
+func (m *model) refreshNumbering() {
+	for _, v := range []*view{&m.main, &m.search, m.thread} {
+		if v != nil && v.numbered != m.numbersVisible(v) {
+			m.rebuild(v, true)
+		}
+	}
 }
 
 func draftKey(channel, thread string) string { return channel + ":" + thread }
@@ -328,6 +341,7 @@ func (m *model) rebuild(v *view, anchor bool) {
 	v.viewport.Width, v.viewport.Height = width, height
 	var lines []string
 	v.starts = nil
+	v.numbered = m.numbersVisible(v)
 	// Reserve three digits for the 500-message cache, keeping text aligned as
 	// selection and pagination change the displayed numbers.
 	digits := max(3, len(fmt.Sprint(len(v.messages))))
@@ -363,7 +377,7 @@ func (m *model) rebuild(v *view, anchor bool) {
 		}
 		for row, line := range strings.Split(ansi.Wrap(body, textWidth, ""), "\n") {
 			gutter := strings.Repeat(" ", digits+1)
-			if row == 0 {
+			if row == 0 && v.numbered {
 				gutter = numberStyle.Render(fmt.Sprintf("%*d ", digits, number))
 			}
 			lines = append(lines, gutter+marker+style.Render(line))
@@ -459,6 +473,15 @@ func (m *model) merge(v *view, incoming []core.Message, initial, older bool) {
 }
 
 func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	updated, cmd := m.update(message)
+	next := updated.(model)
+	// Focus can change on keys or async results. Refresh only panes whose
+	// cached number visibility changed, retaining their scroll anchors.
+	next.refreshNumbering()
+	return next, cmd
+}
+
+func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
