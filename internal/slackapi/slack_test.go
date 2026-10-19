@@ -116,6 +116,46 @@ func TestHistoryPreservesPaginationAndRequestBounds(t *testing.T) {
 	}
 }
 
+func TestUsersRetainNamesAndDeactivatedAccountsAcrossPages(t *testing.T) {
+	var calls int
+	b := fakeBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = r.ParseForm()
+		if r.URL.Path != "/users.list" || r.Form.Get("limit") != "200" {
+			t.Errorf("wrong user request: %s %v", r.URL.Path, r.Form)
+		}
+		if calls == 1 {
+			fmt.Fprint(w, `{"ok":true,"members":[{"id":"UACTIVE","name":"alice","real_name":"Old Name","profile":{"display_name":"Alice","real_name":"Alice Example"}},{"id":"UFORMER","name":"former","deleted":true,"profile":{"display_name":"Former Colleague","real_name":"Former Example"}}],"response_metadata":{"next_cursor":"page-two"}}`)
+			return
+		}
+		if r.Form.Get("cursor") != "page-two" {
+			t.Error("user pagination cursor was lost")
+		}
+		fmt.Fprint(w, `{"ok":true,"members":[{"id":"UBOT","name":"bot","is_bot":true,"real_name":"Build Bot","profile":{"real_name":" "}}],"response_metadata":{"next_cursor":""}}`)
+	})
+	users, next, err := b.Users(context.Background(), "")
+	if err != nil || next != "page-two" || len(users) != 2 {
+		t.Fatalf("first user page: %+v, %q, %v", users, next, err)
+	}
+	if users[0].Name != "alice" || users[0].DisplayName != "Alice" || users[0].RealName != "Alice Example" || !users[1].Deleted || users[1].PreferredName() != "Former Colleague" {
+		t.Fatalf("profile names or former account lost: %+v", users)
+	}
+	users, next, err = b.Users(context.Background(), next)
+	if err != nil || next != "" || len(users) != 1 || users[0].RealName != "Build Bot" || !users[0].IsBot {
+		t.Fatalf("second user page: %+v, %q, %v", users, next, err)
+	}
+}
+
+func TestHistoryUsesBotProfileName(t *testing.T) {
+	b := fakeBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"ok":true,"messages":[{"ts":"1.000001","bot_profile":{"name":"Release Bot"},"text":"done"},{"ts":"2.000001","username":"Custom App","bot_profile":{"name":"Default Bot"},"text":"done"}]}`)
+	})
+	page, err := b.History(context.Background(), "C1", core.PageOptions{Limit: 30})
+	if err != nil || len(page.Messages) != 2 || page.Messages[0].User != "Release Bot" || page.Messages[1].User != "Custom App" {
+		t.Fatalf("bot author names: %+v, %v", page, err)
+	}
+}
+
 func TestRateLimitHonorsRetryAfterAndCancellation(t *testing.T) {
 	var calls atomic.Int32
 	b := fakeBackend(t, func(w http.ResponseWriter, r *http.Request) {

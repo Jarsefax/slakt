@@ -19,6 +19,24 @@ func TestTerminalContentCannotExecuteControlSequences(t *testing.T) {
 	}
 }
 
+func TestAuthorResolvesIDsAndPreservesExplicitAppNames(t *testing.T) {
+	names := map[string]string{"U1": "Alice\x1b[2J"}
+	for _, test := range []struct {
+		message core.Message
+		want    string
+	}{
+		{core.Message{UserID: "U1"}, "Alice"},
+		{core.Message{UserID: "U1", User: "U1"}, "Alice"},
+		{core.Message{UserID: "U1", User: "Release App"}, "Release App"},
+		{core.Message{UserID: "UUNKNOWN"}, "UUNKNOWN"},
+		{core.Message{}, "app"},
+	} {
+		if got := Author(test.message, names); got != test.want {
+			t.Errorf("author for %+v = %q, want %q", test.message, got, test.want)
+		}
+	}
+}
+
 func TestEmojiShortcodesInText(t *testing.T) {
 	for _, test := range []struct {
 		name, input, want string

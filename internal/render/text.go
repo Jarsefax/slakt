@@ -81,8 +81,10 @@ func Time(ts string) string {
 // Author resolves the display name at the terminal boundary.
 func Author(m core.Message, names map[string]string) string {
 	user := m.User
-	if user == "" {
-		user = names[m.UserID]
+	if user == "" || user == m.UserID {
+		if name := names[m.UserID]; name != "" {
+			user = name
+		}
 	}
 	if user == "" {
 		user = m.UserID

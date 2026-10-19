@@ -519,7 +519,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.identity, m.conversations, m.users = msg.identity, msg.conversations, msg.users
 		for _, u := range m.users {
-			m.names[u.ID] = u.Name
+			m.names[u.ID] = u.PreferredName()
 		}
 		if m.options.Initial != nil {
 			return m, m.switchTo(*m.options.Initial)
@@ -541,6 +541,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.err.Error()
 			return m, nil
 		}
+		m.names = m.service.UserNames()
 		m.merge(v, msg.page.Messages, !msg.more, msg.more && v.thread == "")
 		v.cursor, v.hasMore = msg.page.Cursor, msg.page.HasMore
 		m.status = "Updated " + time.Now().Format("15:04:05")
@@ -556,6 +557,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.err != nil {
 				m.status = "Refresh paused: " + msg.err.Error()
 			} else {
+				m.names = m.service.UserNames()
 				m.merge(&m.main, msg.main, false, false)
 				if m.thread != nil && m.thread.thread == msg.thread {
 					m.merge(m.thread, msg.replies, false, false)
@@ -573,6 +575,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.err.Error()
 			return m, nil
 		}
+		m.names = m.service.UserNames()
 		m.search.messages = msg.result.Messages
 		m.search.selected = 0
 		m.searchActive = true
@@ -598,7 +601,11 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			v = m.thread
 		}
 		if v != nil && v.conversation.ID == msg.channel && v.thread == msg.thread {
-			msg.message.User = m.identity.User
+			msg.message.UserID = m.identity.UserID
+			msg.message.User = m.names[m.identity.UserID]
+			if msg.message.User == "" {
+				msg.message.User = m.identity.User
+			}
 			m.merge(v, []core.Message{msg.message}, false, false)
 			v.selected = max(0, len(v.messages)-1)
 			m.rebuild(v, false)
@@ -1011,6 +1018,9 @@ func (m model) choices(query string) []choice {
 		}
 	}
 	for _, u := range m.users {
+		if u.Deleted {
+			continue
+		}
 		if strings.Contains(strings.ToLower(u.Name+" "+u.DisplayName), query) {
 			choices = append(choices, choice{label: "@" + u.Name + " · open DM", user: u.ID})
 		}

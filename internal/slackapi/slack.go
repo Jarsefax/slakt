@@ -196,9 +196,11 @@ func (b *Backend) Users(ctx context.Context, cursor string) ([]core.User, string
 		p, err := p.Next(ctx)
 		items := make([]core.User, 0, len(p.Users))
 		for _, u := range p.Users {
-			if !u.Deleted {
-				items = append(items, core.User{ID: u.ID, Name: u.Name, DisplayName: u.Profile.DisplayName})
+			realName := u.Profile.RealName
+			if strings.TrimSpace(realName) == "" {
+				realName = u.RealName
 			}
+			items = append(items, core.User{ID: u.ID, Name: u.Name, DisplayName: u.Profile.DisplayName, RealName: realName, Deleted: u.Deleted, IsBot: u.IsBot})
 		}
 		return page{items, p.Cursor}, err
 	})
@@ -207,6 +209,9 @@ func (b *Backend) Users(ctx context.Context, cursor string) ([]core.User, string
 
 func message(channel string, m slack.Message) core.Message {
 	r := core.Message{ChannelID: channel, Timestamp: m.Timestamp, ThreadTS: m.ThreadTimestamp, UserID: m.User, User: m.Username, Text: m.Text, ReplyCount: m.ReplyCount}
+	if r.User == "" && m.BotProfile != nil {
+		r.User = m.BotProfile.Name
+	}
 	for _, reaction := range m.Reactions {
 		r.Reactions = append(r.Reactions, core.Reaction{Name: reaction.Name, Count: reaction.Count})
 	}

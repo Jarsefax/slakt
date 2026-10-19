@@ -90,6 +90,26 @@ func TestEmojiDisplayPreservesOriginalJSON(t *testing.T) {
 	}
 }
 
+func TestCLIResolvesAuthorsAndMentionsWithoutPriorDirectoryLoad(t *testing.T) {
+	for _, args := range [][]string{
+		{"--demo", "read", "CENGINEERING"},
+		{"--demo", "read", "#engineering"},
+		{"--demo", "search", "deploy"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			out, err := run(t, args...)
+			if err != nil || !strings.Contains(out, "  Alice\n") || !strings.Contains(out, "  Sam\n") || !strings.Contains(out, "@Sam") || strings.Contains(out, "UALICE") || strings.Contains(out, "USAM") {
+				t.Fatalf("names missing: %q, err=%v", out, err)
+			}
+		})
+	}
+	out, err := run(t, "--demo", "read", "CENGINEERING", "--json")
+	var page core.MessagePage
+	if err != nil || json.Unmarshal([]byte(out), &page) != nil || len(page.Messages) != 2 || page.Messages[1].UserID != "UALICE" || page.Messages[1].User != "Alice" || !strings.Contains(page.Messages[1].Text, "<@USAM>") {
+		t.Fatalf("JSON must retain IDs and original message text: %q, err=%v", out, err)
+	}
+}
+
 func TestCLIRejectsInvalidInputWithoutOpeningTUI(t *testing.T) {
 	for _, args := range [][]string{{"send", "#general"}, {"--demo", "read", "#general", "--limit", "0"}, {"--demo", "thread", "not-a-url"}, {"--demo", "auth", "login"}, {"--demo", "search", "query", "--page", "0"}, {"--json"}, {"--unknown"}} {
 		if out, err := run(t, args...); err == nil {

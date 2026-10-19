@@ -76,6 +76,20 @@ type User struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	DisplayName string `json:"display_name"`
+	RealName    string `json:"real_name,omitempty"`
+	Deleted     bool   `json:"deleted,omitempty"`
+	IsBot       bool   `json:"is_bot,omitempty"`
+}
+
+// PreferredName is shared by message authors and mentions. Keep Name as the
+// account username so existing @username lookups continue to work.
+func (u User) PreferredName() string {
+	for _, name := range []string{u.DisplayName, u.RealName, u.Name, u.ID} {
+		if name = strings.TrimSpace(name); name != "" {
+			return name
+		}
+	}
+	return ""
 }
 
 type Reaction struct {
@@ -133,6 +147,7 @@ type Service struct {
 	Backend       Backend
 	mu            sync.Mutex
 	users         []User
+	usersLoaded   time.Time
 	conversations []Conversation
 	loaded        time.Time
 }
@@ -174,10 +189,10 @@ func (s *Service) Directory(ctx context.Context, refresh bool) ([]Conversation, 
 	if err != nil {
 		return nil, nil, err
 	}
-	users, err := collect(ctx, s.Backend.Users)
-	if err != nil {
+	if err := s.loadUsers(ctx, refresh); err != nil {
 		return nil, nil, err
 	}
+	users := s.users
 	names := map[string]string{}
 	for _, user := range users {
 		names[user.ID] = user.Name
@@ -197,6 +212,33 @@ func (s *Service) Directory(ctx context.Context, refresh bool) ([]Conversation, 
 	SortConversations(conversations)
 	s.conversations, s.users, s.loaded = conversations, users, time.Now()
 	return append([]Conversation(nil), conversations...), append([]User(nil), users...), nil
+}
+
+// loadUsers holds a separate cache from conversations so reading a channel by
+// ID, a thread, or search can resolve names without listing conversations.
+// The caller must hold s.mu.
+func (s *Service) loadUsers(ctx context.Context, refresh bool) error {
+	if !refresh && !s.usersLoaded.IsZero() && time.Since(s.usersLoaded) < 5*time.Minute {
+		return nil
+	}
+	users, err := collect(ctx, s.Backend.Users)
+	if err != nil {
+		return err
+	}
+	s.users, s.usersLoaded = users, time.Now()
+	return nil
+}
+
+// UserNames returns a snapshot of the cached names, including deactivated users
+// whose messages and mentions remain in history.
+func (s *Service) UserNames() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	names := make(map[string]string, len(s.users))
+	for _, u := range s.users {
+		names[u.ID] = u.PreferredName()
+	}
+	return names
 }
 
 var channelID = regexp.MustCompile(`^[CGD][A-Z0-9]+$`)
@@ -237,6 +279,9 @@ func (s *Service) DM(ctx context.Context, ref string) (Conversation, error) {
 		}
 		var matches []User
 		for _, u := range users {
+			if u.Deleted {
+				continue
+			}
 			if strings.EqualFold(u.Name, ref) || u.DisplayName != "" && strings.EqualFold(u.DisplayName, ref) {
 				matches = append(matches, u)
 			}
@@ -268,7 +313,7 @@ func (s *Service) Messages(ctx context.Context, channel, thread string, opts Pag
 	if err != nil {
 		return MessagePage{}, err
 	}
-	s.hydrate(page.Messages)
+	s.hydrate(ctx, page.Messages)
 	SortMessages(page.Messages)
 	if page.Messages == nil {
 		page.Messages = []Message{}
@@ -284,26 +329,35 @@ func (s *Service) Search(ctx context.Context, query string, limit, page int) (Se
 		return SearchResult{}, errors.New("search limit must be 1–100 and page must be positive")
 	}
 	r, err := s.Backend.Search(ctx, query, limit, page)
-	s.hydrate(r.Messages)
+	if err != nil {
+		return r, err
+	}
+	s.hydrate(ctx, r.Messages)
 	if r.Messages == nil {
 		r.Messages = []Message{}
 	}
 	return r, err
 }
 
-func (s *Service) hydrate(messages []Message) {
+func (s *Service) hydrate(ctx context.Context, messages []Message) {
+	if len(messages) == 0 {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	names := map[string]string{}
+	// Name lookup is best effort: a missing users:read scope or a failed refresh
+	// must not hide messages that were successfully read. Retain any cached names.
+	_ = s.loadUsers(ctx, false)
+	users := make(map[string]User, len(s.users))
 	for _, u := range s.users {
-		names[u.ID] = u.Name
+		users[u.ID] = u
 	}
 	for i := range messages {
 		m := &messages[i]
-		if m.User == "" {
-			m.User = names[m.UserID]
+		if u, ok := users[m.UserID]; ok && (!u.IsBot || m.User == "" || m.User == m.UserID) {
+			m.User = u.PreferredName()
 		}
-		if m.User == "" {
+		if strings.TrimSpace(m.User) == "" {
 			m.User = m.UserID
 		}
 	}

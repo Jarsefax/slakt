@@ -7,6 +7,11 @@ The first version includes channels, private conversations, DMs, paginated
 history, threads, search, messages, and reactions. It runs locally, uses your
 Slack identity, and stores OAuth credentials in your OS keyring.
 
+Message authors and mentions use Slack display names, falling back to full
+names, usernames, then user IDs. Names remain available for deactivated users'
+older messages. If the user directory is unavailable, messages still load with
+the available author name or ID.
+
 ## Try it
 
 For development, install Go **1.26 or newer**, then:

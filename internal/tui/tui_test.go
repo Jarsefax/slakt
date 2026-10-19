@@ -27,6 +27,26 @@ func loadedModel(t *testing.T) model {
 	return mm.(model)
 }
 
+func TestMessageAuthorsMentionsAndSentMessagesUseDisplayNames(t *testing.T) {
+	m := loadedModel(t)
+	frame := ansi.Strip(m.main.viewport.View())
+	if !strings.Contains(frame, "Alice") || !strings.Contains(frame, "Sam") || !strings.Contains(frame, "@Sam") {
+		t.Fatalf("display names missing from message view: %s", frame)
+	}
+	mm, _ := m.Update(sentResult{channel: m.main.conversation.ID, message: core.Message{Timestamp: "9999999999.000001", Text: "hello"}})
+	m = mm.(model)
+	sent := m.main.messages[len(m.main.messages)-1]
+	if sent.UserID != "UYOU" || sent.User != "You" {
+		t.Fatalf("sent author = %+v", sent)
+	}
+	m.users = append(m.users, core.User{ID: "UFORMER", Name: "former", DisplayName: "Former Colleague", Deleted: true})
+	for _, choice := range m.choices("former") {
+		if choice.user == "UFORMER" {
+			t.Fatal("deactivated author was offered as a new DM recipient")
+		}
+	}
+}
+
 func key(m model, k string) (model, tea.Cmd) {
 	var msg tea.KeyMsg
 	switch k {

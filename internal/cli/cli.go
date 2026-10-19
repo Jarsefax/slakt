@@ -245,7 +245,7 @@ func New(version string) *cobra.Command {
 			return writeJSON(cmd.OutOrStdout(), result)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "%d matches · page %d/%d\n\n", result.Total, result.Page, max(1, result.Pages))
-		printMessages(cmd.OutOrStdout(), result.Messages)
+		printMessages(cmd.OutOrStdout(), result.Messages, s.UserNames())
 		return nil
 	}}
 	search.Flags().IntVar(&limit, "limit", 30, "Results per page (1–100)")
@@ -303,7 +303,7 @@ func addMessagesCommand(root *cobra.Command, o *options, thread bool) {
 		if o.json {
 			return writeJSON(cmd.OutOrStdout(), result)
 		}
-		printMessages(cmd.OutOrStdout(), result.Messages)
+		printMessages(cmd.OutOrStdout(), result.Messages, s.UserNames())
 		if result.Cursor != "" {
 			fmt.Fprintf(cmd.OutOrStdout(), "Next page: --cursor %s\n", render.Safe(result.Cursor))
 		} else if result.HasMore {
@@ -343,9 +343,9 @@ func (o *options) openTUI(cmd *cobra.Command, c *core.Conversation) error {
 	return tui.Run(cmd.Context(), s, tui.Options{Initial: c, PollInterval: o.poll, Demo: o.demo})
 }
 
-func printMessages(w io.Writer, messages []core.Message) {
+func printMessages(w io.Writer, messages []core.Message, names map[string]string) {
 	for _, m := range messages {
-		fmt.Fprintf(w, "%s\n  %s:%s\n\n", render.Message(m, nil), render.Safe(m.ChannelID), render.Safe(m.Timestamp))
+		fmt.Fprintf(w, "%s\n  %s:%s\n\n", render.Message(m, names), render.Safe(m.ChannelID), render.Safe(m.Timestamp))
 	}
 }
 
