@@ -178,6 +178,17 @@ func (s *Store) SaveMode(ctx context.Context, mode SidebarMode) error {
 	if !mode.Valid() {
 		return fmt.Errorf("invalid sidebar mode %q", mode)
 	}
+	return s.saveSetting(ctx, "sidebar_mode", string(mode))
+}
+
+func (s *Store) SaveMessageOpenTarget(ctx context.Context, target MessageOpenTarget) error {
+	if !target.Valid() {
+		return fmt.Errorf("invalid message_open_target %q (use desktop or browser)", target)
+	}
+	return s.saveSetting(ctx, "message_open_target", string(target))
+}
+
+func (s *Store) saveSetting(ctx context.Context, key, value string) error {
 	return locked(ctx, s.ConfigPath, func() error {
 		config := map[string]json.RawMessage{}
 		if err := readJSON(s.ConfigPath, &config); err != nil {
@@ -186,7 +197,7 @@ func (s *Store) SaveMode(ctx context.Context, mode SidebarMode) error {
 		if config == nil {
 			return fmt.Errorf("invalid configuration in %s", s.ConfigPath)
 		}
-		config["sidebar_mode"], _ = json.Marshal(mode)
+		config[key], _ = json.Marshal(value)
 		return writeJSON(s.ConfigPath, config)
 	})
 }

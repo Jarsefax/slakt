@@ -134,6 +134,9 @@ slkt reply 'C012345:1720000000.000001' 'Looks good'
 slkt react 'C012345:1720000000.000001' thumbsup
 slkt search 'in:engineering deploy after:2026-10-01'
 slkt search 'from:alice' --limit 30 --page 2 --json
+slkt config get message_open_target        # Effective value; defaults to desktop
+slkt config set message_open_target browser
+slkt config set message_open_target desktop
 slkt auth logout
 ```
 
@@ -216,7 +219,15 @@ The `"message_open_target"` setting controls where `o` opens the selected messag
 - `"browser"` opens the message directly in Slack's web client in your default
   browser, bypassing the permalink landing page that can also launch the app.
 
-Edit the configuration and restart slkt to change the message target. Each key
+Use `slkt config set message_open_target desktop` or
+`slkt config set message_open_target browser`, then restart slkt to change the
+message target. `slkt config get message_open_target` prints the effective value,
+including the default when no setting has been saved. Both commands accept
+`--json`, run locally without Slack authentication, and honor `XDG_CONFIG_HOME`.
+The setter preserves other configuration fields. Configuration commands reject
+`--demo`, which keeps its settings in memory.
+
+You can also edit the configuration file directly. Each key
 press opens only the chosen target; a launch failure is reported in the TUI.
 Invalid target values are reported on startup. Cycling the sidebar mode preserves
 the message target.

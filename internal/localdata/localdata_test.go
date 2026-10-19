@@ -162,6 +162,38 @@ func TestReadPositionsSurviveRestartAndSeparateAccounts(t *testing.T) {
 	}
 }
 
+func TestConcurrentConfigurationSavesMerge(t *testing.T) {
+	store := testStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	start := make(chan struct{})
+	for i := range 8 {
+		wg.Go(func() {
+			<-start
+			other := &Store{ConfigPath: store.ConfigPath}
+			if i%2 == 0 {
+				errs <- other.SaveMode(ctx, UnreadOnly)
+			} else {
+				errs <- other.SaveMessageOpenTarget(ctx, Browser)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	config, err := store.LoadConfig()
+	if err != nil || config.SidebarMode != UnreadOnly || config.MessageOpenTarget != Browser {
+		t.Fatalf("concurrent config saves lost settings: %+v, %v", config, err)
+	}
+}
+
 func TestConcurrentReadPositionSavesMerge(t *testing.T) {
 	store := testStore(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -72,6 +72,7 @@ func New(version string) *cobra.Command {
 	root.PersistentFlags().DurationVar(&o.poll, "poll-interval", 15*time.Second, "TUI refresh interval (minimum 5s)")
 	root.RunE = func(cmd *cobra.Command, args []string) error { return o.openTUI(cmd, nil) }
 	root.CompletionOptions.DisableDefaultCmd = true
+	addConfigCommand(root, o)
 	authCmd := &cobra.Command{Use: "auth", Short: "Authorize your Slack account", Args: cobra.NoArgs}
 	root.AddCommand(authCmd)
 	clientID, redirect := "", ""
