@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,7 +42,9 @@ type view struct {
 	selected     int
 	viewport     viewport.Model
 	starts       []int
-	numbered     bool // Number visibility in the cached viewport.
+	numbered     bool   // Number visibility in the cached viewport.
+	day          string // Local date used by the cached Today separator.
+	todayIndex   int    // First message below the Today separator, or -1.
 	cursor       string
 	hasMore      bool
 	loading      bool
@@ -177,10 +180,10 @@ func (m *model) numbersVisible(v *view) bool {
 	return !m.sidebar && m.mode == "" && !m.help && v == m.active()
 }
 
-func (m *model) refreshNumbering() {
+func (m *model) refreshViews(now time.Time) {
 	for _, v := range []*view{&m.main, &m.search, m.thread} {
-		if v != nil && v.numbered != m.numbersVisible(v) {
-			m.rebuild(v, true)
+		if v != nil && (v.numbered != m.numbersVisible(v) || v.day != now.Format("2006-01-02")) {
+			m.rebuildAt(v, true, now)
 		}
 	}
 }
@@ -324,6 +327,10 @@ func (m *model) dimensions() (int, int, int) {
 }
 
 func (m *model) rebuild(v *view, anchor bool) {
+	m.rebuildAt(v, anchor, time.Now())
+}
+
+func (m *model) rebuildAt(v *view, anchor bool, now time.Time) {
 	_, width, height := m.dimensions()
 	if m.thread != nil && m.width >= 125 {
 		left := (width - 3) / 2
@@ -342,12 +349,24 @@ func (m *model) rebuild(v *view, anchor bool) {
 	var lines []string
 	v.starts = nil
 	v.numbered = m.numbersVisible(v)
+	v.day = now.Format("2006-01-02")
+	v.todayIndex = -1
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	start, end := startOfDay.Unix(), startOfDay.AddDate(0, 0, 1).Unix()
 	// Reserve three digits for the 500-message cache, keeping text aligned as
 	// selection and pagination change the displayed numbers.
 	digits := max(3, len(fmt.Sprint(len(v.messages))))
 	gutterWidth := digits + 3
 	textWidth := max(1, width-gutterWidth)
 	for i, msg := range v.messages {
+		seconds, _, _ := strings.Cut(msg.Timestamp, ".")
+		ts, err := strconv.ParseInt(seconds, 10, 64)
+		if v.todayIndex < 0 && err == nil && ts >= start && ts < end {
+			lines = append(lines, todaySeparator(width))
+			v.todayIndex = i
+		} else if i > 0 {
+			lines = append(lines, separator(width))
+		}
 		v.starts = append(v.starts, len(lines))
 		number := max(i-v.selected, v.selected-i)
 		marker := "  "
@@ -382,9 +401,6 @@ func (m *model) rebuild(v *view, anchor bool) {
 			}
 			lines = append(lines, gutter+marker+style.Render(line))
 		}
-		if i+1 < len(v.messages) {
-			lines = append(lines, separator(width))
-		}
 	}
 	if len(lines) == 0 {
 		lines = []string{muted.Render("  No messages yet.")}
@@ -414,12 +430,15 @@ func (m *model) reveal(v *view) {
 		return
 	}
 	start := v.starts[v.selected]
+	if v.selected == v.todayIndex {
+		start-- // Reveal the Today label with its first message.
+	}
 	if start < v.viewport.YOffset {
 		v.viewport.SetYOffset(start)
 	}
 	end := v.viewport.TotalLineCount()
 	if v.selected+1 < len(v.starts) {
-		end = v.starts[v.selected+1]
+		end = v.starts[v.selected+1] - 1 // Exclude the separator before the next message.
 	}
 	if end > v.viewport.YOffset+v.viewport.Height {
 		v.viewport.SetYOffset(max(start, end-v.viewport.Height))
@@ -475,9 +494,9 @@ func (m *model) merge(v *view, incoming []core.Message, initial, older bool) {
 func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := m.update(message)
 	next := updated.(model)
-	// Focus can change on keys or async results. Refresh only panes whose
-	// cached number visibility changed, retaining their scroll anchors.
-	next.refreshNumbering()
+	// Focus and the local date can change while panes are cached. Preserve
+	// their scroll anchors when refreshing numbering or the Today separator.
+	next.refreshViews(time.Now())
 	return next, cmd
 }
 
@@ -1045,6 +1064,12 @@ func fit(text string, width int) string {
 
 func separator(width int) string {
 	return lipgloss.NewStyle().Foreground(borderColor).Render(strings.Repeat("─", max(0, width)))
+}
+
+func todaySeparator(width int) string {
+	label := fit(" Today ", width)
+	padding := max(0, width-ansi.StringWidth(label))
+	return accent.Bold(true).Render(strings.Repeat("─", padding/2) + label + strings.Repeat("─", padding-padding/2))
 }
 
 func sidebarHeading(section string, width int) string {

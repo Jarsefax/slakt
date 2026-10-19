@@ -165,6 +165,10 @@ API is not used. Reopen slkt to reload directory metadata.
 
 ## TUI keys
 
+A bold **Today** separator marks the first loaded message from the current local
+calendar day in conversations, threads, and search. It refreshes when the local
+day changes.
+
 | Key | Action |
 | --- | --- |
 | `Ctrl+k` | Jump to a conversation or person; arrows choose a result |
