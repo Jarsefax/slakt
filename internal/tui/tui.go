@@ -83,6 +83,7 @@ type model struct {
 	helpOffset                           int
 	sending                              bool
 	polling                              bool
+	nextPoll                             time.Time
 	sidebarMode                          localdata.SidebarMode
 	messageOpenTarget                    localdata.MessageOpenTarget
 	openMessage                          func(target, team, channel, ts, thread string) error
@@ -139,6 +140,7 @@ type pollResult struct {
 	err             error
 }
 type tickMsg time.Time
+type pollCountdownMsg struct{}
 type editorResult struct {
 	text string
 	err  error
@@ -189,12 +191,34 @@ func newModel(ctx context.Context, s *core.Service, opts Options) model {
 	composer.SetHeight(3)
 	composer.ShowLineNumbers = false
 	composer.KeyMap.InsertNewline.SetKeys("enter", "alt+enter")
-	return model{ctx: ctx, service: s, options: opts, input: input, composer: composer, drafts: map[string]string{}, names: map[string]string{}, sidebarMode: localdata.All, messageOpenTarget: localdata.Desktop, openMessage: platform.OpenSlackMessage, readState: localdata.NewReadState(time.Now()), latest: map[string]string{}, width: 100, height: 30, status: "Connecting…", main: view{viewport: viewport.New(60, 15)}, search: view{viewport: viewport.New(60, 15)}}
+	now := time.Now()
+	return model{ctx: ctx, service: s, options: opts, input: input, composer: composer, drafts: map[string]string{}, names: map[string]string{}, sidebarMode: localdata.All, messageOpenTarget: localdata.Desktop, openMessage: platform.OpenSlackMessage, readState: localdata.NewReadState(now), latest: map[string]string{}, nextPoll: now.Add(opts.PollInterval), width: 100, height: 30, status: "Connecting…", main: view{viewport: viewport.New(60, 15)}, search: view{viewport: viewport.New(60, 15)}}
 }
 
-func (m model) Init() tea.Cmd { return tea.Batch(m.directoryCmd(), m.tick(), m.unreadTick()) }
+func (m model) Init() tea.Cmd {
+	return tea.Batch(m.directoryCmd(), m.tick(), m.unreadTick(), pollCountdownTick())
+}
 func (m model) tick() tea.Cmd {
-	return tea.Tick(m.options.PollInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
+	return tea.Tick(time.Until(m.nextPoll), func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+func pollCountdownTick() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return pollCountdownMsg{} })
+}
+
+func (m model) pollIndicator(now time.Time) string {
+	if m.polling {
+		return "poll [■■■■■] polling…"
+	}
+	if m.nextPoll.IsZero() || m.options.PollInterval <= 0 {
+		return "poll waiting"
+	}
+	remaining := min(m.options.PollInterval, max(0, m.nextPoll.Sub(now)))
+	filled := int(5 * (1 - float64(remaining)/float64(m.options.PollInterval)))
+	seconds := remaining / time.Second
+	if remaining%time.Second != 0 {
+		seconds++
+	}
+	return fmt.Sprintf("poll [%s%s] %ds", strings.Repeat("■", filled), strings.Repeat("□", 5-filled), seconds)
 }
 func (m model) directoryCmd() tea.Cmd {
 	return func() tea.Msg {
@@ -651,11 +675,15 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.observeLatest(msg.channel, msg.latest)
 		}
 		return m, m.unreadTick()
+	case pollCountdownMsg:
+		return m, pollCountdownTick()
 	case tickMsg:
 		if !m.polling && !m.main.loading && m.main.conversation.ID != "" && !m.sending {
 			m.polling = true
+			m.nextPoll = time.Time{}
 			return m, m.pollCmd()
 		}
+		m.nextPoll = time.Now().Add(m.options.PollInterval)
 		return m, m.tick()
 	case pollResult:
 		m.polling = false
@@ -672,6 +700,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "Updated " + time.Now().Format("15:04:05")
 			}
 		}
+		m.nextPoll = time.Now().Add(m.options.PollInterval)
 		return m, m.tick()
 	case searchResult:
 		if msg.query != m.searchQuery {
@@ -1418,6 +1447,6 @@ func (m model) View() string {
 	if m.storageError != "" {
 		statusText = m.storageError
 	}
-	status := muted.Render(" "+fit(statusText, m.width-3)) + "\n" + muted.Render(fit(fmt.Sprintf(" polling every %s · %s", m.options.PollInterval, m.identity.User), m.width))
+	status := muted.Render(" "+fit(statusText, m.width-3)) + "\n" + muted.Render(fit(fmt.Sprintf(" %s · %s", m.pollIndicator(time.Now()), m.identity.User), m.width))
 	return header + "\n" + separator(m.width) + "\n" + body + "\n" + separator(m.width) + "\n" + bottom + "\n" + status
 }

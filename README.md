@@ -310,6 +310,9 @@ expansion. Unsaved drafts do not survive process exit or a crash.
 - The TUI polls the active channel and open thread every **15 seconds** by
   default. Change this with `--poll-interval 30s` (minimum 5s). This is not a
   Socket Mode event feed and needs no app-level token.
+- The footer shows a small progress bar and seconds until the next poll. It
+  displays `polling…` while refreshing, then restarts the countdown when the
+  request finishes.
 - Inactive conversations are checked one at a time for local unread indicators,
   requesting at most one history item per check. Checks are at least three seconds
   apart (slower if configured polling permits), starting at most 20 checks
