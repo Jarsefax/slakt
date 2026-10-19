@@ -85,6 +85,9 @@ func TestSearchNumbersFollowFocusAndReturnToChannel(t *testing.T) {
 	m, _ = key(m, "tab")
 	assertNoMessageNumbers(t, m.search)
 	m, _ = key(m, "esc")
+	assertMessageNumbers(t, m.search, []string{"1", "1"})
+	assertNoMessageNumbers(t, m.main)
+	m, _ = key(m, "esc")
 	assertMessageNumbers(t, m.main, []string{"1", "2"})
 	assertNoMessageNumbers(t, m.search)
 }

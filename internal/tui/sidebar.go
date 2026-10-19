@@ -22,7 +22,7 @@ func (m model) isUnread(channel string) bool {
 }
 
 func (m model) readingMain() bool {
-	return m.main.conversation.ID != "" && !m.main.loading && !m.searchActive && !m.help &&
+	return m.main.conversation.ID != "" && !m.main.loading && !m.sidebar && !m.searchActive && !m.help &&
 		(m.thread == nil || m.width >= 125) && m.width >= 40 && m.height >= 15
 }
 

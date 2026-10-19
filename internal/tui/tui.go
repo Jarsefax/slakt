@@ -62,6 +62,10 @@ type model struct {
 	users                                []core.User
 	names                                map[string]string
 	main                                 view
+	preview                              *view
+	previewGeneration                    int
+	previewCancel                        context.CancelFunc
+	previewError                         string
 	thread                               *view
 	search                               view
 	searchActive                         bool
@@ -163,10 +167,13 @@ func Run(ctx context.Context, service *core.Service, opts Options) error {
 		m.options.Store = nil
 	}
 	finished, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
-	if final, ok := finished.(model); ok && (final.configDirty || final.readDirty) {
-		final.persistLocal()
-		if err == nil && final.storageError != "" {
-			err = fmt.Errorf("%s", final.storageError)
+	if final, ok := finished.(model); ok {
+		final.clearPreview()
+		if final.configDirty || final.readDirty {
+			final.persistLocal()
+			if err == nil && final.storageError != "" {
+				err = fmt.Errorf("%s", final.storageError)
+			}
 		}
 	}
 	return err
@@ -221,7 +228,7 @@ func (m *model) numbersVisible(v *view) bool {
 }
 
 func (m *model) refreshViews(now time.Time) {
-	for _, v := range []*view{&m.main, &m.search, m.thread} {
+	for _, v := range []*view{&m.main, &m.search, m.thread, m.preview} {
 		if v != nil && (v.numbered != m.numbersVisible(v) || v.day != now.Format("2006-01-02")) {
 			m.rebuildAt(v, true, now)
 		}
@@ -247,6 +254,7 @@ func (m *model) switchTo(c core.Conversation) tea.Cmd {
 	m.thread = nil
 	m.searchActive = false
 	m.sidebar = false
+	m.clearPreview()
 	m.main = view{conversation: c, loading: true, generation: m.main.generation + 1, viewport: viewport.New(60, 15)}
 	m.selectSidebar(c.ID)
 	m.restoreDraft()
@@ -371,7 +379,7 @@ func (m *model) rebuildAt(v *view, anchor bool, now time.Time) {
 		left := (width - 3) / 2
 		if v == m.thread {
 			width -= left + 3
-		} else if v == &m.main || v == &m.search {
+		} else if v == &m.main || v == &m.search || v == m.preview {
 			width = left
 		}
 	}
@@ -542,6 +550,7 @@ func (m *model) merge(v *view, incoming []core.Message, initial, older bool) {
 func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := m.update(message)
 	next := updated.(model)
+	cmd = tea.Batch(cmd, next.syncPreview())
 	if next.readingMain() {
 		next.markRead(next.main.conversation.ID, next.main.messages)
 	}
@@ -563,6 +572,22 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.thread != nil {
 			m.rebuild(m.thread, true)
 		}
+		if m.preview != nil {
+			m.rebuild(m.preview, true)
+		}
+	case previewResult:
+		if m.preview == nil || m.preview.conversation.ID != msg.channel || m.preview.generation != msg.generation {
+			return m, nil
+		}
+		m.preview.loading = false
+		if msg.err != nil {
+			m.previewError = msg.err.Error()
+			return m, nil
+		}
+		m.names = m.service.UserNames()
+		m.merge(m.preview, msg.page.Messages, true, false)
+		m.preview.cursor, m.preview.hasMore = msg.page.Cursor, msg.page.HasMore
+		m.observeLatest(msg.channel, newestTimestamp(msg.page.Messages))
 	case directoryResult:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -962,6 +987,10 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "esc":
+		if m.sidebar {
+			m.sidebar = false
+			return m, nil
+		}
 		m.saveDraft()
 		if m.thread != nil {
 			m.thread = nil
@@ -1095,6 +1124,8 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) prompt(mode, placeholder string) tea.Cmd {
+	m.sidebar = false
+	m.clearPreview()
 	m.mode = mode
 	m.input.SetValue("")
 	m.input.Placeholder = placeholder
@@ -1276,7 +1307,7 @@ func pane(v view, width, height int, label string) string {
 }
 
 func helpLines(width int) []string {
-	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry starts only with i, /, Ctrl+k, or r.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: All / Unread first / Unread only.\nThe open conversation stays listed until you leave.\n\nUpdates use polling. Drafts live only in this process."
+	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry starts only with i, /, Ctrl+k, or r.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: All / Unread first / Unread only.\nSidebar arrows/j/k preview without marking read.\nEnter opens; Tab/Esc returns to the original view.\nThe open conversation stays listed until you leave.\n\nUpdates use polling. Drafts live only in this process."
 	return strings.Split(ansi.Wrap(text, max(20, width-2), ""), "\n")
 }
 
@@ -1302,15 +1333,19 @@ func (m model) View() string {
 	} else {
 		v := m.main
 		label := m.main.conversation.Label()
-		if m.searchActive {
+		if m.searchActive && !m.sidebar {
 			v = m.search
 			label = fmt.Sprintf("Search: %s · %d matches · %d/%d", m.searchQuery, m.searchTotal, m.searchPage, max(1, m.searchPages))
+		}
+		if m.preview != nil {
+			v = *m.preview
+			label = "Preview · " + v.conversation.Label()
 		}
 		if m.thread != nil && m.width >= 125 {
 			left := (width - 3) / 2
 			right := width - left - 3
 			body = lipgloss.JoinHorizontal(lipgloss.Top, pane(v, left, height, label), accent.Render(" │ "), pane(*m.thread, right, height, "Thread · "+m.thread.conversation.Label()))
-		} else if m.thread != nil {
+		} else if m.thread != nil && !m.sidebar {
 			body = pane(*m.thread, width, height, "Thread · "+m.thread.conversation.Label()+" · Esc back")
 		} else {
 			body = pane(v, width, height, label)
@@ -1356,7 +1391,7 @@ func (m model) View() string {
 		v := m.active()
 		switch {
 		case m.sidebar:
-			action = "Enter: open conversation  "
+			action = "↑/↓ preview  Enter: open  Tab/Esc: back  "
 		case m.thread != nil:
 			action = "Esc: back  "
 		case len(v.messages) > 0:
@@ -1374,6 +1409,9 @@ func (m model) View() string {
 		bottom = muted.Render(fit(" q quit · m mode · ↑/↓ scroll · ?/Esc back", m.width))
 	}
 	statusText := m.status
+	if m.previewError != "" {
+		statusText = "Preview failed: " + m.previewError
+	}
 	if m.unreadError != "" {
 		statusText = m.unreadError
 	}

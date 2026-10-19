@@ -182,10 +182,19 @@ Press `m` outside text entry to cycle the conversation sidebar mode, from any pa
 
 The current mode appears below **CONVERSATIONS**. A **●** marks conversations
 with unread messages. `Ctrl+k` always searches the full conversation directory.
-Messages in a visible conversation are marked read as they arrive. Messages
-received while its timeline is hidden by help, search, or a narrow thread view
-remain unread until you return to the timeline. Opening a conversation treats
-its loaded history as read, without requiring you to scroll through each message.
+With the sidebar focused, `j/k` or arrows preview the highlighted conversation
+in the message pane without marking it read. An open thread stays alongside the
+preview on wide terminals; on narrow terminals the preview temporarily replaces
+the thread. `Enter` opens the highlighted conversation normally. `Tab` or `Esc`
+discards the preview and returns to the original conversation, thread, or search,
+preserving drafts and scroll positions.
+
+Messages in an open conversation are marked read as they arrive while browsing
+its timeline. Read tracking pauses while the conversation sidebar has focus,
+including during background refreshes. Messages received while its timeline is
+hidden by help, search, or a narrow thread view remain unread until you return
+to the timeline. Opening a conversation treats its loaded history as read,
+without requiring you to scroll through each message.
 
 Unread tracking belongs to slkt and does not read or change Slack's read markers.
 Existing history starts read when tracking is first enabled for an account;
@@ -250,14 +259,14 @@ day changes.
 | `Ctrl+k` | Jump to a conversation or person; arrows choose a result |
 | `Tab` | Focus/unfocus the conversation sidebar |
 | `m` | Cycle All / Unread first / Unread only outside text entry, from any pane |
-| `j/k`, arrows | Select a message or conversation |
+| `j/k`, arrows | Select a message; preview conversations while the sidebar has focus |
 | `PgUp/PgDn`, `Ctrl+u/d` | Scroll long messages |
 | `g/G` | First/last loaded message |
-| `Enter` | Open a thread or search result |
+| `Enter` | Open a thread, search result, or highlighted sidebar conversation |
 | `i` | Compose; Enter inserts a newline |
 | `Ctrl+s` | Send the draft; return to browsing on success |
 | `Ctrl+e` | Edit draft with `$VISUAL`, `$EDITOR`, or `vi` |
-| `Esc` | Save draft in this session / close thread or search |
+| `Esc` | Leave sidebar preview / save draft in this session / close thread or search |
 | `/` | Search |
 | `n` | Load another history/thread page or search page |
 | `r` | Add a reaction by emoji name |
