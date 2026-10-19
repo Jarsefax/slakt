@@ -46,7 +46,7 @@ func TestModeRoundTripPreservesOtherConfiguration(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(store.ConfigPath), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(store.ConfigPath, []byte(`{"future_setting":true}`), 0600); err != nil {
+	if err := os.WriteFile(store.ConfigPath, []byte(`{"future_setting":true,"message_open_target":"browser"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []SidebarMode{UnreadFirst, UnreadOnly, All} {
@@ -61,6 +61,10 @@ func TestModeRoundTripPreservesOtherConfiguration(t *testing.T) {
 		if err := readJSON(store.ConfigPath, &config); err != nil || config["future_setting"] != true {
 			t.Fatalf("unrelated setting lost: %v, %v", config, err)
 		}
+		loaded, err := store.LoadConfig()
+		if err != nil || loaded.MessageOpenTarget != Browser {
+			t.Fatalf("message open target lost: %+v, %v", loaded, err)
+		}
 	}
 	if _, err := os.Stat(store.StatePath); !os.IsNotExist(err) {
 		t.Fatalf("saving mode touched read state: %v", err)
@@ -68,6 +72,49 @@ func TestModeRoundTripPreservesOtherConfiguration(t *testing.T) {
 	info, _ := os.Stat(store.ConfigPath)
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("configuration permissions = %o", info.Mode().Perm())
+	}
+}
+
+func TestMessageOpenTargetConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name, content string
+		want          MessageOpenTarget
+		invalid       bool
+	}{
+		{name: "missing file", want: Desktop},
+		{name: "missing setting", content: `{"sidebar_mode":"unread-first"}`, want: Desktop},
+		{name: "desktop", content: `{"message_open_target":"desktop"}`, want: Desktop},
+		{name: "browser", content: `{"message_open_target":"browser"}`, want: Browser},
+		{name: "unknown target", content: `{"message_open_target":"both"}`, invalid: true},
+		{name: "empty target", content: `{"message_open_target":""}`, invalid: true},
+		{name: "wrong type", content: `{"message_open_target":true}`, invalid: true},
+		{name: "malformed JSON", content: `{"message_open_target":`, invalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := testStore(t)
+			if test.content != "" {
+				if err := os.MkdirAll(filepath.Dir(store.ConfigPath), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(store.ConfigPath, []byte(test.content), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			config, err := store.LoadConfig()
+			if test.invalid {
+				if err == nil {
+					t.Fatal("invalid configuration accepted")
+				}
+			} else if err != nil || config.MessageOpenTarget != test.want {
+				t.Fatalf("config = %+v, %v, want target %s", config, err, test.want)
+			}
+			if test.content != "" {
+				data, err := os.ReadFile(store.ConfigPath)
+				if err != nil || string(data) != test.content {
+					t.Fatalf("loading changed configuration: %s, %v", data, err)
+				}
+			}
+		})
 	}
 }
 

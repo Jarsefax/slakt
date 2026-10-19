@@ -45,6 +45,20 @@ func (m SidebarMode) Next() SidebarMode {
 	}
 }
 
+type MessageOpenTarget string
+
+const (
+	Desktop MessageOpenTarget = "desktop"
+	Browser MessageOpenTarget = "browser"
+)
+
+func (t MessageOpenTarget) Valid() bool { return t == Desktop || t == Browser }
+
+type Config struct {
+	SidebarMode       SidebarMode       `json:"sidebar_mode"`
+	MessageOpenTarget MessageOpenTarget `json:"message_open_target"`
+}
+
 // StartedAt establishes a baseline once per account, including conversations
 // that have not been opened yet. Old history starts read; offline arrivals do not.
 type ReadState struct {
@@ -95,18 +109,27 @@ func readJSON(path string, value any) error {
 	return nil
 }
 
-func (s *Store) LoadMode() (SidebarMode, error) {
-	var config struct {
-		SidebarMode SidebarMode `json:"sidebar_mode"`
-	}
+func (s *Store) LoadConfig() (Config, error) {
+	config := Config{SidebarMode: All, MessageOpenTarget: Desktop}
 	if err := readJSON(s.ConfigPath, &config); err != nil {
-		return All, err
+		return config, err
 	}
 	if config.SidebarMode == "" {
-		return All, nil
+		config.SidebarMode = All
 	}
 	if !config.SidebarMode.Valid() {
-		return All, fmt.Errorf("invalid sidebar_mode %q in %s", config.SidebarMode, s.ConfigPath)
+		return config, fmt.Errorf("invalid sidebar_mode %q in %s", config.SidebarMode, s.ConfigPath)
+	}
+	if !config.MessageOpenTarget.Valid() {
+		return config, fmt.Errorf("invalid message_open_target %q in %s (use desktop or browser)", config.MessageOpenTarget, s.ConfigPath)
+	}
+	return config, nil
+}
+
+func (s *Store) LoadMode() (SidebarMode, error) {
+	config, err := s.LoadConfig()
+	if err != nil {
+		return All, err
 	}
 	return config.SidebarMode, nil
 }

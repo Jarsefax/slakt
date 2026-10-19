@@ -80,6 +80,8 @@ type model struct {
 	sending                              bool
 	polling                              bool
 	sidebarMode                          localdata.SidebarMode
+	messageOpenTarget                    localdata.MessageOpenTarget
+	openMessage                          func(target, team, channel, ts, thread string) error
 	readState                            localdata.ReadState
 	latest                               map[string]string
 	unreadIndex                          int
@@ -151,11 +153,12 @@ func Run(ctx context.Context, service *core.Service, opts Options) error {
 			}
 			m.options.Store = store
 		}
-		mode, err := m.options.Store.LoadMode()
+		config, err := m.options.Store.LoadConfig()
 		if err != nil {
 			return err
 		}
-		m.sidebarMode = mode
+		m.sidebarMode = config.SidebarMode
+		m.messageOpenTarget = config.MessageOpenTarget
 	} else {
 		m.options.Store = nil
 	}
@@ -179,7 +182,7 @@ func newModel(ctx context.Context, s *core.Service, opts Options) model {
 	composer.SetHeight(3)
 	composer.ShowLineNumbers = false
 	composer.KeyMap.InsertNewline.SetKeys("enter", "alt+enter")
-	return model{ctx: ctx, service: s, options: opts, input: input, composer: composer, drafts: map[string]string{}, names: map[string]string{}, sidebarMode: localdata.All, readState: localdata.NewReadState(time.Now()), latest: map[string]string{}, width: 100, height: 30, status: "Connecting…", main: view{viewport: viewport.New(60, 15)}, search: view{viewport: viewport.New(60, 15)}}
+	return model{ctx: ctx, service: s, options: opts, input: input, composer: composer, drafts: map[string]string{}, names: map[string]string{}, sidebarMode: localdata.All, messageOpenTarget: localdata.Desktop, openMessage: platform.OpenSlackMessage, readState: localdata.NewReadState(time.Now()), latest: map[string]string{}, width: 100, height: 30, status: "Connecting…", main: view{viewport: viewport.New(60, 15)}, search: view{viewport: viewport.New(60, 15)}}
 }
 
 func (m model) Init() tea.Cmd { return tea.Batch(m.directoryCmd(), m.tick(), m.unreadTick()) }
@@ -1061,12 +1064,17 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		if len(v.messages) > 0 {
 			message := v.messages[v.selected]
-			return m, func() tea.Msg {
-				link, err := m.service.Backend.Permalink(m.ctx, message.ChannelID, message.Timestamp)
-				if err == nil {
-					err = platform.OpenURL(link)
+			if message.ThreadTS == "" {
+				message.ThreadTS = v.thread
+			}
+			if message.ThreadTS == "" && message.Permalink != "" {
+				if _, root, err := core.ParseThreadRef(message.Permalink); err == nil {
+					message.ThreadTS = root
 				}
-				return actionResult{"Opened in Slack", err}
+			}
+			return m, func() tea.Msg {
+				err := m.openMessage(string(m.messageOpenTarget), m.identity.TeamID, message.ChannelID, message.Timestamp, message.ThreadTS)
+				return actionResult{"Opened in Slack (" + string(m.messageOpenTarget) + ")", err}
 			}
 		}
 	}
@@ -1255,7 +1263,7 @@ func pane(v view, width, height int, label string) string {
 }
 
 func helpLines(width int) []string {
-	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message in Slack\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry starts only with i, /, Ctrl+k, or r.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: All / Unread first / Unread only.\nThe open conversation stays listed until you leave.\n\nUpdates use polling. Drafts live only in this process."
+	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry starts only with i, /, Ctrl+k, or r.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: All / Unread first / Unread only.\nThe open conversation stays listed until you leave.\n\nUpdates use polling. Drafts live only in this process."
 	return strings.Split(ansi.Wrap(text, max(20, width-2), ""), "\n")
 }
 

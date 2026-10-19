@@ -193,16 +193,35 @@ inside a thread, edits, and reactions do not create sidebar unread indicators.
 
 ## Local configuration and state
 
-Sidebar configuration and read positions are stored separately:
+UI configuration and read positions are stored separately:
 
 | Data | Default Linux path | Environment override |
 | --- | --- | --- |
-| Sidebar mode | `~/.config/slakt/config.json` | `$XDG_CONFIG_HOME/slakt/config.json` |
+| UI settings | `~/.config/slakt/config.json` | `$XDG_CONFIG_HOME/slakt/config.json` |
 | Read positions | `~/.local/state/slakt/read-state.json` | `$XDG_STATE_HOME/slakt/read-state.json` |
 
 The configuration uses `"sidebar_mode": "all"`, `"unread-first"`, or
-`"unread-only"`; changing the mode saves it immediately without changing focus. Read
-positions are scoped by workspace and account and saved when messages are read.
+`"unread-only"`; changing the mode saves it immediately without changing focus.
+The `"message_open_target"` setting controls where `o` opens the selected message:
+
+```json
+{
+  "sidebar_mode": "all",
+  "message_open_target": "desktop"
+}
+```
+
+- `"desktop"` (the default when omitted) opens the message directly in the
+  installed Slack app using its registered `slack://` handler.
+- `"browser"` opens the message directly in Slack's web client in your default
+  browser, bypassing the permalink landing page that can also launch the app.
+
+Edit the configuration and restart slkt to change the message target. Each key
+press opens only the chosen target; a launch failure is reported in the TUI.
+Invalid target values are reported on startup. Cycling the sidebar mode preserves
+the message target.
+
+Read positions are scoped by workspace and account and saved when messages are read.
 Files contain IDs, timestamps, and settings, with no message text or credentials.
 Updates use private files and atomic replacement; concurrent sessions merge read
 positions without moving them backwards. Deleting the state file resets tracking
@@ -231,7 +250,7 @@ day changes.
 | `/` | Search |
 | `n` | Load another history/thread page or search page |
 | `r` | Add a reaction by emoji name |
-| `o` | Open selected message in Slack |
+| `o` | Open selected message in desktop Slack (default) or the configured browser target |
 | `R` | Reload current conversation |
 | `?` | Keybinding guide |
 | `q` | Quit outside text entry, including help and pending operations |
