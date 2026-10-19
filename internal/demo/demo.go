@@ -40,7 +40,7 @@ func New() *Backend {
 	add("CGENERAL", "USAM", "Search with /, react with r, or press ? for the keyboard guide.", 15)
 	add("CGENERAL", "UALICE", "Your draft stays here while you switch conversations. Ctrl+s sends it; Esc returns to browsing.", 18)
 	add("CENGINEERING", "USAM", "Deploy notes for today:\n```\ngo test ./...\nCGO_ENABLED=0 go build ./cmd/slkt\n```", 2)
-	add("CENGINEERING", "UALICE", "The deploy looks good. Thanks <@USAM>!", 5)
+	add("CENGINEERING", "UALICE", "The deploy looks *good*. Thanks <@USAM>! _Ready for review._ ~Pending~", 5)
 	add("CRANDOM", "USAM", "Small tools. Quiet terminals. Good coffee. :coffee:", 4)
 	add("CPRIVATE", "UALICE", "Private conversation history appears alongside your joined channels.", 5)
 	add("DALICE", "UALICE", "Hey! Want to try replying from the terminal?", 6)

@@ -117,16 +117,20 @@ def main():
         assert "Thread" in send(b"\r"), "thread did not open"
         composing = send(b"i")
         assert "COMPOSE" in composing and "To #general / thread" in composing, "explicit compose mode or thread destination missing"
-        send(b"Offline PTY thread smoke test. :thumbsup: :female-technologist::skin-tone-4:")
+        send(b"Offline PTY *bold* _italic_ ~strike~ `*literal*` :thumbsup: :female-technologist::skin-tone-4:")
         sent = send(b"\x13")
         assert "Message sent" in sent, "demo thread send failed"
         assert "q quit" in sent, "successful thread send did not return to browsing"
         assert "👍" in sent and "👩🏽‍💻" in sent, "sent emoji did not render"
+        assert all(word in sent for word in ("bold", "italic", "strike", "*literal*")), "formatted message text missing"
+        assert all(markup not in sent for markup in ("*bold*", "_italic_", "~strike~", "`")), "message formatting markers were not rendered"
         send(b"\x1b")
         send(b"\x1b")
         send(b"/")
         send(b"deploy")
-        assert "2 matches" in send(b"\r"), "search results missing"
+        searched = send(b"\r")
+        assert "2 matches" in searched, "search results missing"
+        assert "```" not in searched, "code fences remain in search results"
         assert "Thread" in send(b"\r"), "search result thread did not open"
         send(b"\x1b")
         send(b"\x1b")
@@ -144,7 +148,7 @@ def main():
         send(b"j")
         send(b"q")
         assert process.wait(timeout=3) == 0, "TUI exited unsuccessfully"
-        print("PASS: grouped sidebar/navigation, hybrid message numbers, thread indicators, channel jump, thread send with emoji, search/result thread, DM send, resize, help, quit (offline PTY)")
+        print("PASS: grouped sidebar/navigation, hybrid message numbers, thread indicators, channel jump, formatted thread send with emoji, search/result thread, DM send, resize, help, quit (offline PTY)")
         check_quit_paths(binary, environment)
     finally:
         if process.poll() is None:

@@ -423,18 +423,31 @@ func (m *model) rebuildAt(v *view, anchor bool, now time.Time) {
 		if m.searchActive && v == &m.search {
 			header = authorStyle.Render(render.Safe(msg.ChannelID)) + metadataStyle.Render(" · ") + header
 		}
-		body := header + "\n" + render.MessageBody(msg, m.names)
+		body := header + "\n" + render.FormattedMessageBody(msg, m.names, func(text string, formatting render.TextStyle) string {
+			inline := style.UnsetWidth().Bold(formatting.Bold).Italic(formatting.Italic).Strikethrough(formatting.Strike)
+			if formatting.Code {
+				inline = inline.Foreground(lipgloss.Color("#FCD34D"))
+				if i != v.selected {
+					inline = inline.Background(lipgloss.Color("#202B40"))
+				} else {
+					inline = inline.Underline(true)
+				}
+			}
+			return inline.Render(text)
+		})
 		if v.thread == "" {
 			if indicator := threadIndicator(msg); indicator != "" {
 				body += "\n" + threadStyle.Render(indicator)
 			}
 		}
-		for row, line := range strings.Split(ansi.Wrap(body, textWidth, ""), "\n") {
+		// Lip Gloss balances ANSI styles across wrapped rows before gutters
+		// are added, so emphasis cannot leak into markers or the next row.
+		for row, line := range strings.Split(style.Width(textWidth).Render(body), "\n") {
 			gutter := strings.Repeat(" ", digits+1)
 			if row == 0 && v.numbered {
 				gutter = numberStyle.Render(fmt.Sprintf("%*d ", digits, number))
 			}
-			lines = append(lines, gutter+marker+style.Render(line))
+			lines = append(lines, gutter+marker+line)
 		}
 	}
 	if len(lines) == 0 {

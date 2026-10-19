@@ -320,6 +320,11 @@ expansion. Unsaved drafts do not survive process exit or a crash.
   Slack before retrying. The composer keeps the draft on failure.
 - Terminal output strips untrusted control sequences. JSON escapes controls while
   preserving the decoded content. Tokens and message bodies are not logged.
+- The TUI displays Slack's `*bold*`, `_italic_`, and `~strikethrough~` as terminal
+  styles, highlights inline code, indents code blocks, and marks quotes with a
+  side bar. Formatting stays literal inside code; unmatched markers remain
+  visible. Style appearance depends on the terminal and font. Plain CLI output
+  and JSON retain the original formatting markers.
 - Standard emoji names in messages and reactions display as Unicode emoji,
   including skin tones and combined emoji. Code snippets and URLs stay literal;
   custom or unknown emoji stay as `:name:`. Appearance and color depend on the

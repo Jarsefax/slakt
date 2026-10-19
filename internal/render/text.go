@@ -107,10 +107,19 @@ func Message(m core.Message, names map[string]string) string {
 
 // MessageBody renders text, attachments, and reactions without header metadata.
 func MessageBody(m core.Message, names map[string]string) string {
+	return messageBody(m, func(text string) string { return Text(text, names) })
+}
+
+// FormattedMessageBody renders mrkdwn in both the message and its attachments.
+func FormattedMessageBody(m core.Message, names map[string]string, format func(string, TextStyle) string) string {
+	return messageBody(m, func(text string) string { return FormattedText(text, names, format) })
+}
+
+func messageBody(m core.Message, text func(string) string) string {
 	var out strings.Builder
-	out.WriteString(Text(m.Text, names))
+	out.WriteString(text(m.Text))
 	for _, a := range m.Attachments {
-		out.WriteString("\n│ " + Text(a, names))
+		out.WriteString("\n│ " + text(a))
 	}
 	if len(m.Reactions) > 0 {
 		out.WriteString("\n")
