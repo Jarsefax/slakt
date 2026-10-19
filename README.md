@@ -168,7 +168,7 @@ per-conversation API requests or new scopes. Slack's documented Web API does not
 sidebar section names or assignments. The deprecated `stars.list` saved-items
 API is not used. Reopen slkt to reload directory metadata.
 
-Focus the sidebar with `Tab`, then press `m` to cycle its mode:
+Press `m` outside text entry to cycle the conversation sidebar mode, from any pane:
 
 - **All** keeps every conversation in its usual alphabetical order.
 - **Unread first** keeps every conversation, placing unread conversations first
@@ -201,7 +201,7 @@ Sidebar configuration and read positions are stored separately:
 | Read positions | `~/.local/state/slakt/read-state.json` | `$XDG_STATE_HOME/slakt/read-state.json` |
 
 The configuration uses `"sidebar_mode": "all"`, `"unread-first"`, or
-`"unread-only"`; changing the mode in the sidebar saves it immediately. Read
+`"unread-only"`; changing the mode saves it immediately without changing focus. Read
 positions are scoped by workspace and account and saved when messages are read.
 Files contain IDs, timestamps, and settings, with no message text or credentials.
 Updates use private files and atomic replacement; concurrent sessions merge read
@@ -219,7 +219,7 @@ day changes.
 | --- | --- |
 | `Ctrl+k` | Jump to a conversation or person; arrows choose a result |
 | `Tab` | Focus/unfocus the conversation sidebar |
-| `m` | Cycle All / Unread first / Unread only while the sidebar is focused |
+| `m` | Cycle All / Unread first / Unread only outside text entry, from any pane |
 | `j/k`, arrows | Select a message or conversation |
 | `PgUp/PgDn`, `Ctrl+u/d` | Scroll long messages |
 | `g/G` | First/last loaded message |

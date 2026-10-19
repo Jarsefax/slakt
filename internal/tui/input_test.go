@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Jarsefax/slakt/internal/core"
+	"github.com/Jarsefax/slakt/internal/localdata"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -51,6 +52,84 @@ func TestQuitWorksOutsideTextEntry(t *testing.T) {
 				_, cmd := key(m, quitKey)
 				assertQuit(t, cmd)
 			})
+		}
+	}
+}
+
+func TestModeKeyFollowsPlainQuitAvailabilityWithoutChangingFocus(t *testing.T) {
+	for _, state := range []string{"channel", "thread", "sidebar", "help", "loading", "sending", "search results", "undersized input"} {
+		t.Run(state, func(t *testing.T) {
+			m := loadedModel(t)
+			switch state {
+			case "thread":
+				m, _ = key(m, "enter")
+			case "sidebar":
+				m, _ = key(m, "tab")
+			case "help":
+				m, _ = key(m, "?")
+			case "loading":
+				m.main.loading = true
+			case "sending":
+				m, _ = key(m, "i")
+				m, _ = key(m, "a message")
+				m, _ = key(m, "ctrl+s")
+			case "search results":
+				m.searchActive = true
+			case "undersized input":
+				m, _ = key(m, "i")
+				m.width = 20
+			}
+			_, quit := key(m, "q")
+			assertQuit(t, quit)
+			changed, cmd := key(m, "m")
+			if changed.sidebarMode != localdata.UnreadFirst || cmd != nil {
+				t.Fatal("m did not cycle the mode where plain q is available")
+			}
+			if changed.sidebar != m.sidebar || changed.help != m.help || changed.mode != m.mode ||
+				changed.sending != m.sending || changed.searchActive != m.searchActive || changed.thread != m.thread ||
+				changed.composer.Focused() != m.composer.Focused() || changed.input.Focused() != m.input.Focused() ||
+				changed.main.conversation.ID != m.main.conversation.ID || changed.main.selected != m.main.selected ||
+				changed.composer.Value() != m.composer.Value() {
+				t.Fatal("m changed focus, selection, input, or pending operation")
+			}
+			changed, _ = key(changed, "mm")
+			if changed.sidebarMode != localdata.All {
+				t.Fatal("batched m keys did not cycle in order")
+			}
+			changed, cmd = key(changed, "mqm")
+			assertQuit(t, cmd)
+			if changed.sidebarMode != localdata.UnreadFirst {
+				t.Fatal("batched m after quit should not execute")
+			}
+		})
+	}
+}
+
+func TestModeKeyStaysLiteralInEveryTextEntryMode(t *testing.T) {
+	for _, entry := range []string{"i", "/", "ctrl+k", "r"} {
+		t.Run(entry, func(t *testing.T) {
+			m := loadedModel(t)
+			m, _ = key(m, entry)
+			m, _ = key(m, "mmm")
+			updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Paste: true})
+			m = updated.(model)
+			value := m.input.Value()
+			if entry == "i" {
+				value = m.composer.Value()
+			}
+			if value != "mmmm" || m.sidebarMode != localdata.All {
+				t.Fatalf("m activated a command in text entry: input=%q mode=%q", value, m.sidebarMode)
+			}
+		})
+	}
+	for _, input := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune{'m'}, Paste: true},
+		{Type: tea.KeyRunes, Runes: []rune("mm"), Paste: true},
+		{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true},
+	} {
+		m, cmd := loadedModel(t).Update(input)
+		if m.(model).sidebarMode != localdata.All || cmd != nil {
+			t.Fatal("pasted or modified m activated a command")
 		}
 	}
 }

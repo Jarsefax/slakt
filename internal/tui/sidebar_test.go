@@ -149,22 +149,18 @@ func TestHiddenTimelineDoesNotMarkIncomingMessagesRead(t *testing.T) {
 	}
 }
 
-func TestModeCyclesOnlyWhenBrowsingSidebarAndPersistsSeparately(t *testing.T) {
+func TestModeCyclesFromEitherPaneAndPersistsSeparately(t *testing.T) {
 	m := loadedModel(t)
 	root := t.TempDir()
 	store := &localdata.Store{ConfigPath: filepath.Join(root, "config", "config.json"), StatePath: filepath.Join(root, "state", "read-state.json")}
 	m.options.Store = store
-	m, _ = key(m, "m")
-	if m.sidebarMode != localdata.All {
-		t.Fatal("m changed mode without sidebar focus")
-	}
-	m, _ = key(m, "tab")
 	for _, want := range []localdata.SidebarMode{localdata.UnreadFirst, localdata.UnreadOnly, localdata.All} {
 		m, _ = key(m, "m")
 		got, err := store.LoadMode()
 		if err != nil || m.sidebarMode != want || got != want {
 			t.Fatalf("mode = %s, saved = %s, error = %v, want %s", m.sidebarMode, got, err, want)
 		}
+		m, _ = key(m, "tab")
 	}
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Paste: true})
 	m = updated.(model)

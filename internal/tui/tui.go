@@ -769,6 +769,10 @@ func (m model) enteringText() bool {
 	return m.mode != "" && !m.help && !m.sending && m.width >= 40 && m.height >= 15
 }
 
+func (m model) isCommandKey(key tea.KeyMsg, command string) bool {
+	return !key.Paste && key.String() == command && !m.enteringText()
+}
+
 func (m model) isQuitKey(key tea.KeyMsg) bool {
 	if key.Paste {
 		return false
@@ -778,7 +782,7 @@ func (m model) isQuitKey(key tea.KeyMsg) bool {
 		// A terminal may encode a rapid Escape, q as Alt+q.
 		return true
 	case "q":
-		return !m.enteringText()
+		return m.isCommandKey(key, "q")
 	}
 	return false
 }
@@ -807,6 +811,14 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.isQuitKey(key) {
 		return m, tea.Quit
+	}
+	if m.isCommandKey(key, "m") {
+		selected := m.sidebarSelectedID()
+		m.sidebarMode = m.sidebarMode.Next()
+		m.selectSidebar(selected)
+		m.configDirty = true
+		m.persistLocal()
+		return m, nil
 	}
 	if m.width < 40 || m.height < 15 {
 		return m, nil
@@ -949,12 +961,6 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.sidebar {
 		items := m.sidebarConversations()
 		switch k {
-		case "m":
-			selected := m.sidebarSelectedID()
-			m.sidebarMode = m.sidebarMode.Next()
-			m.selectSidebar(selected)
-			m.configDirty = true
-			m.persistLocal()
 		case "j", "down":
 			m.sideIndex = min(m.sideIndex+1, max(0, len(items)-1))
 		case "k", "up":
@@ -1249,7 +1255,7 @@ func pane(v view, width, height int, label string) string {
 }
 
 func helpLines(width int) []string {
-	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode (sidebar focused)\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message in Slack\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry starts only with i, /, Ctrl+k, or r.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: All / Unread first / Unread only.\nThe open conversation stays listed until you leave.\n\nUpdates use polling. Drafts live only in this process."
+	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message in Slack\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry starts only with i, /, Ctrl+k, or r.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: All / Unread first / Unread only.\nThe open conversation stays listed until you leave.\n\nUpdates use polling. Drafts live only in this process."
 	return strings.Split(ansi.Wrap(text, max(20, width-2), ""), "\n")
 }
 
@@ -1305,7 +1311,7 @@ func (m model) View() string {
 		}
 		label := " COMPOSE · To " + context + " · Ctrl+s send · Esc browse · Ctrl+c quit · Ctrl+e editor"
 		if m.sending {
-			label = " SENDING · To " + context + " · q / Ctrl+c quit"
+			label = " SENDING · To " + context + " · m mode · q / Ctrl+c quit"
 		}
 		bottom = accent.Render(fit(label, m.width)) + "\n" + m.composer.View()
 	case "jump", "search", "react":
@@ -1329,7 +1335,7 @@ func (m model) View() string {
 		v := m.active()
 		switch {
 		case m.sidebar:
-			action = "m: sidebar mode  Enter: open conversation  "
+			action = "Enter: open conversation  "
 		case m.thread != nil:
 			action = "Esc: back  "
 		case len(v.messages) > 0:
@@ -1338,13 +1344,13 @@ func (m model) View() string {
 				action = "Enter: open thread  "
 			}
 		}
-		bottom = muted.Render(fit(" q quit  i compose  "+action+"Ctrl+k jump  / search  ? help", m.width))
+		bottom = muted.Render(fit(" q quit  m mode  i compose  "+action+"Ctrl+k jump  / search  ? help", m.width))
 		if draft := m.drafts[draftKey(m.main.conversation.ID, "")]; draft != "" {
 			bottom += "\n" + accent.Render(fit(" Draft saved for this conversation · i to continue", m.width))
 		}
 	}
 	if m.help {
-		bottom = muted.Render(fit(" q quit · ↑/↓ scroll · ?/Esc back", m.width))
+		bottom = muted.Render(fit(" q quit · m mode · ↑/↓ scroll · ?/Esc back", m.width))
 	}
 	statusText := m.status
 	if m.unreadError != "" {
