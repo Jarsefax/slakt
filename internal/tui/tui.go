@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Jarsefax/slakt/internal/core"
+	"github.com/Jarsefax/slakt/internal/localdata"
 	"github.com/Jarsefax/slakt/internal/platform"
 	"github.com/Jarsefax/slakt/internal/render"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -33,6 +34,7 @@ type Options struct {
 	Initial      *core.Conversation
 	PollInterval time.Duration
 	Demo         bool
+	Store        *localdata.Store
 }
 
 type view struct {
@@ -77,6 +79,14 @@ type model struct {
 	helpOffset                           int
 	sending                              bool
 	polling                              bool
+	sidebarMode                          localdata.SidebarMode
+	readState                            localdata.ReadState
+	latest                               map[string]string
+	unreadIndex                          int
+	unreadPolling                        bool
+	unreadError                          string
+	storageError                         string
+	configDirty, readDirty               bool
 }
 
 type directoryResult struct {
@@ -84,6 +94,7 @@ type directoryResult struct {
 	conversations []core.Conversation
 	users         []core.User
 	err           error
+	readState     localdata.ReadState
 }
 type messagesResult struct {
 	channel, thread string
@@ -132,7 +143,29 @@ func Run(ctx context.Context, service *core.Service, opts Options) error {
 		return fmt.Errorf("poll interval must be at least 5s")
 	}
 	m := newModel(ctx, service, opts)
-	_, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
+	if !opts.Demo {
+		if m.options.Store == nil {
+			store, err := localdata.DefaultStore()
+			if err != nil {
+				return err
+			}
+			m.options.Store = store
+		}
+		mode, err := m.options.Store.LoadMode()
+		if err != nil {
+			return err
+		}
+		m.sidebarMode = mode
+	} else {
+		m.options.Store = nil
+	}
+	finished, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
+	if final, ok := finished.(model); ok && (final.configDirty || final.readDirty) {
+		final.persistLocal()
+		if err == nil && final.storageError != "" {
+			err = fmt.Errorf("%s", final.storageError)
+		}
+	}
 	return err
 }
 
@@ -146,10 +179,10 @@ func newModel(ctx context.Context, s *core.Service, opts Options) model {
 	composer.SetHeight(3)
 	composer.ShowLineNumbers = false
 	composer.KeyMap.InsertNewline.SetKeys("enter", "alt+enter")
-	return model{ctx: ctx, service: s, options: opts, input: input, composer: composer, drafts: map[string]string{}, names: map[string]string{}, width: 100, height: 30, status: "Connecting…", main: view{viewport: viewport.New(60, 15)}, search: view{viewport: viewport.New(60, 15)}}
+	return model{ctx: ctx, service: s, options: opts, input: input, composer: composer, drafts: map[string]string{}, names: map[string]string{}, sidebarMode: localdata.All, readState: localdata.NewReadState(time.Now()), latest: map[string]string{}, width: 100, height: 30, status: "Connecting…", main: view{viewport: viewport.New(60, 15)}, search: view{viewport: viewport.New(60, 15)}}
 }
 
-func (m model) Init() tea.Cmd { return tea.Batch(m.directoryCmd(), m.tick()) }
+func (m model) Init() tea.Cmd { return tea.Batch(m.directoryCmd(), m.tick(), m.unreadTick()) }
 func (m model) tick() tea.Cmd {
 	return tea.Tick(m.options.PollInterval, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
@@ -162,7 +195,11 @@ func (m model) directoryCmd() tea.Cmd {
 			return directoryResult{err: err}
 		}
 		conversations, users, err := m.service.Directory(ctx, true)
-		return directoryResult{id, conversations, users, err}
+		state := m.readState
+		if err == nil && m.options.Store != nil {
+			state, err = m.options.Store.LoadReadState(ctx, id.TeamID, id.UserID)
+		}
+		return directoryResult{identity: id, conversations: conversations, users: users, err: err, readState: state}
 	}
 }
 
@@ -207,13 +244,8 @@ func (m *model) switchTo(c core.Conversation) tea.Cmd {
 	m.thread = nil
 	m.searchActive = false
 	m.sidebar = false
-	for i, candidate := range m.conversations {
-		if candidate.ID == c.ID {
-			m.sideIndex = i
-			break
-		}
-	}
 	m.main = view{conversation: c, loading: true, generation: m.main.generation + 1, viewport: viewport.New(60, 15)}
+	m.selectSidebar(c.ID)
 	m.restoreDraft()
 	m.status = "Loading " + c.Label() + "…"
 	return m.loadCmd(m.main, false)
@@ -494,6 +526,9 @@ func (m *model) merge(v *view, incoming []core.Message, initial, older bool) {
 func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := m.update(message)
 	next := updated.(model)
+	if next.readingMain() {
+		next.markRead(next.main.conversation.ID, next.main.messages)
+	}
 	// Focus and the local date can change while panes are cached. Preserve
 	// their scroll anchors when refreshing numbering or the Today separator.
 	next.refreshViews(time.Now())
@@ -518,6 +553,9 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.identity, m.conversations, m.users = msg.identity, msg.conversations, msg.users
+		if msg.readState.StartedAt != "" {
+			m.readState = msg.readState
+		}
 		for _, u := range m.users {
 			m.names[u.ID] = u.PreferredName()
 		}
@@ -544,7 +582,34 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.names = m.service.UserNames()
 		m.merge(v, msg.page.Messages, !msg.more, msg.more && v.thread == "")
 		v.cursor, v.hasMore = msg.page.Cursor, msg.page.HasMore
+		if msg.thread == "" {
+			m.observeLatest(msg.channel, newestTimestamp(msg.page.Messages))
+		}
 		m.status = "Updated " + time.Now().Format("15:04:05")
+	case unreadTickMsg:
+		if m.unreadPolling {
+			return m, nil
+		}
+		if m.identity.TeamID != "" {
+			for range m.conversations {
+				i := m.unreadIndex % len(m.conversations)
+				m.unreadIndex = (i + 1) % len(m.conversations)
+				if channel := m.conversations[i].ID; channel != m.main.conversation.ID {
+					m.unreadPolling = true
+					return m, m.unreadCmd(channel)
+				}
+			}
+		}
+		return m, m.unreadTick()
+	case unreadResult:
+		m.unreadPolling = false
+		if msg.err != nil {
+			m.unreadError = "Unread check paused: " + msg.err.Error()
+		} else {
+			m.unreadError = ""
+			m.observeLatest(msg.channel, msg.latest)
+		}
+		return m, m.unreadTick()
 	case tickMsg:
 		if !m.polling && !m.main.loading && m.main.conversation.ID != "" && !m.sending {
 			m.polling = true
@@ -559,6 +624,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.names = m.service.UserNames()
 				m.merge(&m.main, msg.main, false, false)
+				m.observeLatest(msg.channel, newestTimestamp(msg.main))
 				if m.thread != nil && m.thread.thread == msg.thread {
 					m.merge(m.thread, msg.replies, false, false)
 				}
@@ -610,6 +676,9 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			v.selected = max(0, len(v.messages)-1)
 			m.rebuild(v, false)
 			m.reveal(v)
+			if msg.thread == "" {
+				m.observeLatest(msg.channel, msg.message.Timestamp)
+			}
 		}
 		if msg.thread != "" {
 			for _, visible := range []*view{&m.main, &m.search, m.thread} {
@@ -861,12 +930,7 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		m.sidebar = !m.sidebar
 		if m.sidebar {
-			for i, c := range m.conversations {
-				if c.ID == m.main.conversation.ID {
-					m.sideIndex = i
-					break
-				}
-			}
+			m.selectSidebar(m.main.conversation.ID)
 		}
 		return m, nil
 	case "esc":
@@ -883,14 +947,21 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.sidebar {
+		items := m.sidebarConversations()
 		switch k {
+		case "m":
+			selected := m.sidebarSelectedID()
+			m.sidebarMode = m.sidebarMode.Next()
+			m.selectSidebar(selected)
+			m.configDirty = true
+			m.persistLocal()
 		case "j", "down":
-			m.sideIndex = min(m.sideIndex+1, max(0, len(m.conversations)-1))
+			m.sideIndex = min(m.sideIndex+1, max(0, len(items)-1))
 		case "k", "up":
 			m.sideIndex = max(0, m.sideIndex-1)
 		case "enter":
-			if len(m.conversations) > 0 {
-				return m, m.switchTo(m.conversations[min(m.sideIndex, len(m.conversations)-1)])
+			if len(items) > 0 {
+				return m, m.switchTo(items[min(m.sideIndex, len(items)-1)])
 			}
 		}
 		return m, nil
@@ -1098,7 +1169,7 @@ func sidebarHeading(section string, width int) string {
 }
 
 func (m model) sidebarView(width, height int) string {
-	lines := []string{titleStyle.Render("  CONVERSATIONS"), separator(width)}
+	lines := []string{titleStyle.Render("  CONVERSATIONS"), muted.Render(fit("  "+m.sidebarMode.Label()+" · m", width)), separator(width)}
 	type row struct {
 		text, section string
 		heading       bool
@@ -1106,7 +1177,7 @@ func (m model) sidebarView(width, height int) string {
 	}
 	var rows []row
 	section, selectedRow := "", 0
-	for i, c := range m.conversations {
+	for i, c := range m.sidebarConversations() {
 		if c.Section() != section {
 			section = c.Section()
 			if len(rows) > 0 {
@@ -1121,15 +1192,27 @@ func (m model) sidebarView(width, height int) string {
 		if c.ID == m.main.conversation.ID {
 			prefix = "› "
 		}
+		if m.isUnread(c.ID) {
+			prefix += "● "
+		}
 		label := fit(prefix+c.Label(), width-2)
 		if m.sidebar && i == m.sideIndex {
 			label = selectedStyle.Width(width).Render(label)
 		} else if c.ID == m.main.conversation.ID {
 			label = accent.Bold(true).Render(label)
+		} else if m.isUnread(c.ID) {
+			label = titleStyle.Render(label)
 		} else {
 			label = messageStyle.Render(label)
 		}
 		rows = append(rows, row{text: label, section: section})
+	}
+	if len(rows) == 0 && len(lines) < height {
+		label := "No conversations"
+		if m.sidebarMode == localdata.UnreadOnly {
+			label = "No unread conversations"
+		}
+		lines = append(lines, muted.Render(fit(label, width)))
 	}
 	// Leave room for a repeated section heading when scrolling into a group.
 	start := max(0, selectedRow-(height-len(lines))+2)
@@ -1166,7 +1249,7 @@ func pane(v view, width, height int, label string) string {
 }
 
 func helpLines(width int) []string {
-	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message in Slack\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry starts only with i, /, Ctrl+k, or r.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n\nUpdates use polling. Drafts live only in this process."
+	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode (sidebar focused)\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message in Slack\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry starts only with i, /, Ctrl+k, or r.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: All / Unread first / Unread only.\nThe open conversation stays listed until you leave.\n\nUpdates use polling. Drafts live only in this process."
 	return strings.Split(ansi.Wrap(text, max(20, width-2), ""), "\n")
 }
 
@@ -1246,7 +1329,7 @@ func (m model) View() string {
 		v := m.active()
 		switch {
 		case m.sidebar:
-			action = "Enter: open conversation  "
+			action = "m: sidebar mode  Enter: open conversation  "
 		case m.thread != nil:
 			action = "Esc: back  "
 		case len(v.messages) > 0:
@@ -1263,6 +1346,13 @@ func (m model) View() string {
 	if m.help {
 		bottom = muted.Render(fit(" q quit · ↑/↓ scroll · ?/Esc back", m.width))
 	}
-	status := muted.Render(" "+fit(m.status, m.width-3)) + "\n" + muted.Render(fit(fmt.Sprintf(" polling every %s · %s", m.options.PollInterval, m.identity.User), m.width))
+	statusText := m.status
+	if m.unreadError != "" {
+		statusText = m.unreadError
+	}
+	if m.storageError != "" {
+		statusText = m.storageError
+	}
+	status := muted.Render(" "+fit(statusText, m.width-3)) + "\n" + muted.Render(fit(fmt.Sprintf(" polling every %s · %s", m.options.PollInterval, m.identity.User), m.width))
 	return header + "\n" + separator(m.width) + "\n" + body + "\n" + separator(m.width) + "\n" + bottom + "\n" + status
 }

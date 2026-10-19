@@ -28,11 +28,16 @@ without an agreed destination and exact content.
 - `internal/demo`: isolated, in-memory workspace with no network or credentials.
 - `internal/cli`: Cobra commands, JSON and noninteractive behavior.
 - `internal/tui`: Bubble Tea UI, navigation, session drafts and polling.
+- `internal/localdata`: separate XDG sidebar configuration and account-scoped
+  local read positions, private atomic files, and concurrent-session merging.
 - `internal/render`, `internal/platform`: safe terminal text and browser boundary.
 
 Tests use local HTTP servers and simulated data, never the real keyring or Slack.
 Keep that property. Polling is intentional for this release; do not present it as
 Socket Mode or exact unread/read-state synchronization. Drafts are session-only.
+Sidebar modes and local unread indicators persist separately; inactive
+conversations use paced, one-item history checks. Thread-only replies do not
+affect sidebar unread status. See the README for storage paths and read behavior.
 Ship pure-Go builds, and validate platform integrations natively before expanding
 the supported release targets.
 

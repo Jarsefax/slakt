@@ -163,10 +163,51 @@ skipped by keyboard navigation and stay visible when scrolling within a section.
 Starred uses the optional `is_starred` field when Slack includes it in
 [`users.conversations`](https://docs.slack.dev/reference/methods/users.conversations/).
 That endpoint returns limited conversation objects and may omit the flag, so the
-Starred section can be incomplete or absent. There are no extra per-conversation
-API requests or new scopes. Slack's documented Web API does not expose custom
+Starred section can be incomplete or absent. Starred metadata adds no
+per-conversation API requests or new scopes. Slack's documented Web API does not expose custom
 sidebar section names or assignments. The deprecated `stars.list` saved-items
 API is not used. Reopen slkt to reload directory metadata.
+
+Focus the sidebar with `Tab`, then press `m` to cycle its mode:
+
+- **All** keeps every conversation in its usual alphabetical order.
+- **Unread first** keeps every conversation, placing unread conversations first
+  within each section. Each unread/read group remains alphabetical.
+- **Unread only** shows unread conversations and the currently open conversation.
+  Opening a conversation marks it read locally after history loads successfully;
+  its row stays visible until you switch away. Empty sections are hidden.
+
+The current mode appears below **CONVERSATIONS**. A **●** marks conversations
+with unread messages. `Ctrl+k` always searches the full conversation directory.
+Messages in a visible conversation are marked read as they arrive. Messages
+received while its timeline is hidden by help, search, or a narrow thread view
+remain unread until you return to the timeline. Opening a conversation treats
+its loaded history as read, without requiring you to scroll through each message.
+
+Unread tracking belongs to slkt and does not read or change Slack's read markers.
+Existing history starts read when tracking is first enabled for an account;
+messages arriving after that baseline, including while slkt is closed, can be
+flagged unread on the next background check. Tracking covers conversation
+history, including thread replies broadcast to the conversation. Replies only
+inside a thread, edits, and reactions do not create sidebar unread indicators.
+
+## Local configuration and state
+
+Sidebar configuration and read positions are stored separately:
+
+| Data | Default Linux path | Environment override |
+| --- | --- | --- |
+| Sidebar mode | `~/.config/slakt/config.json` | `$XDG_CONFIG_HOME/slakt/config.json` |
+| Read positions | `~/.local/state/slakt/read-state.json` | `$XDG_STATE_HOME/slakt/read-state.json` |
+
+The configuration uses `"sidebar_mode": "all"`, `"unread-first"`, or
+`"unread-only"`; changing the mode in the sidebar saves it immediately. Read
+positions are scoped by workspace and account and saved when messages are read.
+Files contain IDs, timestamps, and settings, with no message text or credentials.
+Updates use private files and atomic replacement; concurrent sessions merge read
+positions without moving them backwards. Deleting the state file resets tracking
+on the next launch without changing the configured mode. Offline demo mode keeps
+both settings and read positions in memory and does not touch these files.
 
 ## TUI keys
 
@@ -178,6 +219,7 @@ day changes.
 | --- | --- |
 | `Ctrl+k` | Jump to a conversation or person; arrows choose a result |
 | `Tab` | Focus/unfocus the conversation sidebar |
+| `m` | Cycle All / Unread first / Unread only while the sidebar is focused |
 | `j/k`, arrows | Select a message or conversation |
 | `PgUp/PgDn`, `Ctrl+u/d` | Scroll long messages |
 | `g/G` | First/last loaded message |
@@ -229,13 +271,19 @@ expansion. Unsaved drafts do not survive process exit or a crash.
 - The TUI polls the active channel and open thread every **15 seconds** by
   default. Change this with `--poll-interval 30s` (minimum 5s). This is not a
   Socket Mode event feed and needs no app-level token.
+- Inactive conversations are checked one at a time for local unread indicators,
+  requesting at most one history item per check. Checks are at least three seconds
+  apart (slower if configured polling permits), starting at most 20 checks
+  per minute, with the usual read retry/backoff behavior. A full scan takes longer
+  in large workspaces; unread modes fill in as results arrive. Failed checks
+  retain known unread state and retry later.
 - Reads honor Slack's `Retry-After`, retry transient failures up to three times,
   and support cancellation. Refresh resumes automatically after disconnection.
   Gap recovery walks pages back to the previously newest message. Selection and
   scroll position stay anchored; the cache holds at most 500 messages per view.
 - Recent channel messages are refreshed for edits/reactions. Deleted cached
   messages and edits to older/thread replies may remain until reload. There are
-  no exact unread counts, read-position synchronization, or background alerts.
+  no exact unread counts, Slack read-position synchronization, or background alerts.
 - Failed refreshes keep the current view. Polling catches up when connectivity
   returns; recovering very large gaps is limited to 100 pages per refresh.
 - Writes are never automatically retried. If a send's outcome is unknown, check
