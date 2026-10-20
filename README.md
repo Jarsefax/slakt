@@ -185,9 +185,18 @@ with unread messages. `Ctrl+k` always searches the full conversation directory.
 With the sidebar focused, `j/k` or arrows preview the highlighted conversation
 in the message pane without marking it read. An open thread stays alongside the
 preview on wide terminals; on narrow terminals the preview temporarily replaces
-the thread. `Enter` opens the highlighted conversation normally. `Tab` or `Esc`
-discards the preview and returns to the original conversation, thread, or search,
-preserving drafts and scroll positions.
+the thread. In **Unread only**, previews show only messages newer than the
+conversation's local read position, including when highlighting the currently
+open conversation. `Enter` opens the highlighted conversation with its full
+history. `Tab` or `Esc` discards the preview and returns to the original
+conversation, thread, or search, preserving drafts and scroll positions.
+
+Press `r` in the sidebar to mark all messages in the highlighted conversation
+read locally once its preview has loaded. Focus stays in the sidebar and the
+preview remains visible. In **Unread only**, the read row stays selected until
+you move up or down to another conversation; then it disappears unless new
+unread messages have arrived. Navigation at a list boundary keeps the row.
+Leaving sidebar browsing also releases the retained row.
 
 Messages in an open conversation are marked read as they arrive while browsing
 its timeline. Read tracking pauses while the conversation sidebar has focus,
@@ -269,16 +278,17 @@ day changes.
 | `Esc` | Leave sidebar preview / save draft in this session / close thread or search |
 | `/` | Search |
 | `n` | Load another history/thread page or search page |
-| `r` | Add a reaction by emoji name |
+| `r` | Mark the highlighted sidebar conversation read; otherwise add a reaction by emoji name |
 | `o` | Open selected message in desktop Slack (default) or the configured browser target |
 | `R` | Reload current conversation |
 | `?` | Keybinding guide |
 | `q` | Quit outside text entry, including help and pending operations |
 | `Ctrl+c` | Quit in any TUI mode |
 
-Text entry starts only when you press `i`, `/`, `Ctrl+k`, or `r`. Opening a channel
-or thread, restoring a saved draft, refreshing, and resizing never activate an
-input. Text-entry modes are labeled **COMPOSE**, **SEARCH**, **JUMP**, or **REACT**.
+Text entry starts only when you press `i`, `/`, or `Ctrl+k`, or use `r` outside
+the sidebar. Opening a channel or thread, restoring a saved draft, refreshing,
+and resizing never activate an input. Text-entry modes are labeled **COMPOSE**,
+**SEARCH**, **JUMP**, or **REACT**.
 Successful sends return to browsing; failed sends keep the draft open for retry.
 While an input is active, `q` is ordinary text and `Ctrl+c` still quits. To leave
 text entry and quit, press `Esc`, then `q`; the terminal's combined `Alt+q`

@@ -31,7 +31,7 @@ func (m model) readingMain() bool {
 func (m model) sidebarConversations() []core.Conversation {
 	items := make([]core.Conversation, 0, len(m.conversations))
 	for _, c := range m.conversations {
-		if m.sidebarMode != localdata.UnreadOnly || m.isUnread(c.ID) || c.ID == m.main.conversation.ID {
+		if m.sidebarMode != localdata.UnreadOnly || m.isUnread(c.ID) || c.ID == m.main.conversation.ID || m.sidebar && c.ID == m.sidebarReadID {
 			items = append(items, c)
 		}
 	}
@@ -76,6 +76,44 @@ func (m *model) selectSidebar(channel string) {
 	m.sideIndex = min(max(0, m.sideIndex), max(0, len(items)-1))
 }
 
+func (m *model) moveSidebar(delta int) {
+	items := m.sidebarConversations()
+	if len(items) == 0 {
+		return
+	}
+	next := min(max(0, m.sideIndex+delta), len(items)-1)
+	if next == m.sideIndex {
+		return
+	}
+	// Choose the neighbor before dropping the retained read row, then find
+	// it again in the filtered list so removing a row never skips a neighbor.
+	channel := items[next].ID
+	m.sidebarReadID = ""
+	m.selectSidebar(channel)
+}
+
+func (m *model) markSidebarRead() {
+	items := m.sidebarConversations()
+	if m.sideIndex < 0 || m.sideIndex >= len(items) {
+		return
+	}
+	c := items[m.sideIndex]
+	v := m.preview
+	if c.ID == m.main.conversation.ID {
+		v = &m.main
+	}
+	if v == nil || v.conversation.ID != c.ID || v.loading {
+		m.status = "Wait for the preview to load before marking read"
+		return
+	}
+	if m.previewError != "" {
+		return
+	}
+	m.sidebarReadID = c.ID
+	m.markReadThrough(c.ID, max(m.latest[c.ID], newestTimestamp(v.messages)))
+	m.status = "Marked " + c.Label() + " read"
+}
+
 func newestTimestamp(messages []core.Message) string {
 	latest := ""
 	for _, msg := range messages {
@@ -91,8 +129,12 @@ func (m *model) observeLatest(channel, latest string) {
 }
 
 func (m *model) markRead(channel string, messages []core.Message) {
+	m.markReadThrough(channel, newestTimestamp(messages))
+}
+
+func (m *model) markReadThrough(channel, latest string) {
 	selected := m.sidebarSelectedID()
-	if latest := newestTimestamp(messages); latest > m.readState.Position(channel) {
+	if latest > m.readState.Position(channel) {
 		m.readState.LastRead[channel] = latest
 		m.readDirty = true
 	}

@@ -64,6 +64,7 @@ type model struct {
 	main                                 view
 	preview                              *view
 	previewGeneration                    int
+	previewAfter                         string
 	previewCancel                        context.CancelFunc
 	previewError                         string
 	thread                               *view
@@ -74,6 +75,7 @@ type model struct {
 	width, height                        int
 	sidebar                              bool
 	sideIndex                            int
+	sidebarReadID                        string
 	mode                                 string
 	input                                textinput.Model
 	composer                             textarea.Model
@@ -484,6 +486,9 @@ func (m *model) rebuildAt(v *view, anchor bool, now time.Time) {
 	}
 	if len(lines) == 0 {
 		lines = []string{muted.Render("  No messages yet.")}
+		if v == m.preview && m.sidebarMode == localdata.UnreadOnly {
+			lines = []string{muted.Render("  No unread messages.")}
+		}
 	}
 	v.viewport.SetContent(strings.Join(lines, "\n"))
 	if anchor && v.selected < len(v.starts) {
@@ -609,7 +614,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.names = m.service.UserNames()
-		m.merge(m.preview, msg.page.Messages, true, false)
+		m.merge(m.preview, messagesAfter(msg.page.Messages, m.previewAfter), true, false)
 		m.preview.cursor, m.preview.hasMore = msg.page.Cursor, msg.page.HasMore
 		m.observeLatest(msg.channel, newestTimestamp(msg.page.Messages))
 	case directoryResult:
@@ -1036,9 +1041,13 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		items := m.sidebarConversations()
 		switch k {
 		case "j", "down":
-			m.sideIndex = min(m.sideIndex+1, max(0, len(items)-1))
+			m.moveSidebar(1)
 		case "k", "up":
-			m.sideIndex = max(0, m.sideIndex-1)
+			m.moveSidebar(-1)
+		case "r":
+			if m.isCommandKey(key, "r") {
+				m.markSidebarRead()
+			}
 		case "enter":
 			if len(items) > 0 {
 				return m, m.switchTo(items[min(m.sideIndex, len(items)-1)])
@@ -1336,7 +1345,7 @@ func pane(v view, width, height int, label string) string {
 }
 
 func helpLines(width int) []string {
-	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Add a reaction\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry starts only with i, /, Ctrl+k, or r.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: All / Unread first / Unread only.\nSidebar arrows/j/k preview without marking read.\nEnter opens; Tab/Esc returns to the original view.\nThe open conversation stays listed until you leave.\n\nUpdates use polling. Drafts live only in this process."
+	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Mark sidebar conversation read / add a reaction\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry: i, /, Ctrl+k; r outside the sidebar.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: All / Unread first / Unread only.\nSidebar arrows/j/k preview without marking read.\nr marks the highlighted conversation read.\nIts preview stays; Unread only keeps its row until you move away.\nEnter opens; Tab/Esc returns to the original view.\nThe open conversation stays listed until you leave.\n\nUpdates use polling. Drafts live only in this process."
 	return strings.Split(ansi.Wrap(text, max(20, width-2), ""), "\n")
 }
 
@@ -1420,7 +1429,7 @@ func (m model) View() string {
 		v := m.active()
 		switch {
 		case m.sidebar:
-			action = "↑/↓ preview  Enter: open  Tab/Esc: back  "
+			action = "↑/↓ preview  r: mark read  Enter: open  Tab/Esc: back  "
 		case m.thread != nil:
 			action = "Esc: back  "
 		case len(v.messages) > 0:
