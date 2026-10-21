@@ -391,12 +391,17 @@ expansion. Unsaved drafts do not survive process exit or a crash.
 
 ## Refresh behavior and limits
 
-- The TUI polls the active channel and open thread every **15 seconds** by
-  default. Change this with `--poll-interval 30s` (minimum 5s). This is not a
+- The TUI polls the open conversation and open thread with a **15-second**
+  interval by default. Change this with `--poll-interval 30s` (minimum 5s). This is not a
   Socket Mode event feed and needs no app-level token.
-- The footer shows a small progress bar and seconds until the next poll. It
-  displays `polling…` while refreshing, then restarts the countdown when the
-  request finishes.
+- The footer names the open conversation being polled, adds `+ thread` when a
+  thread is open, and shows a progress bar, countdown, and configured interval:
+  `poll #general [■■□□□] in 9s · interval 15s`. It displays `polling…` during
+  refreshes, then waits the configured interval after the request finishes.
+  Narrower footers shorten names and use `9s/15s` (remaining/configured interval),
+  dropping the bar when needed. Highlighting a sidebar preview does not change
+  the poll target; Enter opens that conversation. A running refresh keeps its
+  original target label until it finishes.
 - Beside the poll countdown, the unread status keeps `next` first and `checking`
   in fixed positions, shortening long names within their slots. Between checks,
   `next` counts down to the next request and `checking` shows `—`. The countdown

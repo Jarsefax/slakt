@@ -164,6 +164,7 @@ func (m model) helpContent(width int) (string, []string) {
 		section("Reading the workspace")
 		text("● unread conversation · × hidden conversation")
 		text("↳ Thread means a message has replies. The selected message shows its position; other numbers show distance from it.")
+		text("The poll countdown names the open conversation (+ thread when open), not the sidebar preview. Its interval starts after each refresh; unread checks run separately.")
 		if m.sidebar {
 			text("Previews do not mark conversations read. In Unread only, marking a row read keeps its preview until you move away.")
 			text("Modes: Visible / Unread first / Unread only / Hidden / All. Visible and unread modes exclude hidden conversations; Ctrl+k and search can still find them.")

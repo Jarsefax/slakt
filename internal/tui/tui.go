@@ -89,6 +89,8 @@ type model struct {
 	helpOffset                           int
 	sending                              bool
 	polling                              bool
+	pollCurrent                          core.Conversation
+	pollThread                           bool
 	nextPoll                             time.Time
 	sidebarMode                          localdata.SidebarMode
 	hidden                               map[string]bool
@@ -219,26 +221,11 @@ func pollCountdownTick() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { return pollCountdownMsg{} })
 }
 
-func (m model) pollIndicator(now time.Time) string {
-	if m.polling {
-		return "poll [■■■■■] polling…"
-	}
-	if m.nextPoll.IsZero() || m.options.PollInterval <= 0 {
-		return "poll waiting"
-	}
-	remaining := min(m.options.PollInterval, max(0, m.nextPoll.Sub(now)))
-	filled := int(5 * (1 - float64(remaining)/float64(m.options.PollInterval)))
-	seconds := remaining / time.Second
-	if remaining%time.Second != 0 {
-		seconds++
-	}
-	return fmt.Sprintf("poll [%s%s] %ds", strings.Repeat("■", filled), strings.Repeat("□", 5-filled), seconds)
-}
-
 func (m model) footer(now time.Time) string {
-	poll := " " + m.pollIndicator(now)
+	indicator, pollWidth := m.pollDisplay(now)
+	poll := " " + indicator
 	// Keep the unread slots still when the active poll starts or completes.
-	poll += strings.Repeat(" ", max(0, ansi.StringWidth(" poll [■■■■■] polling…")-ansi.StringWidth(poll)))
+	poll += strings.Repeat(" ", max(0, pollWidth-ansi.StringWidth(indicator)))
 	versionWidth := m.width - ansi.StringWidth(poll) - 1
 	if m.width >= unreadInlineWidth {
 		// Reserve a readable unread status before fitting a development version.
@@ -800,6 +787,8 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		if !m.polling && !m.main.loading && m.main.conversation.ID != "" && !m.sending {
 			m.polling = true
+			m.pollCurrent = m.main.conversation
+			m.pollThread = m.thread != nil && m.thread.thread != ""
 			m.nextPoll = time.Time{}
 			return m, m.pollCmd()
 		}
@@ -807,6 +796,8 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.tick()
 	case pollResult:
 		m.polling = false
+		m.pollCurrent = core.Conversation{}
+		m.pollThread = false
 		if msg.channel == m.main.conversation.ID && msg.generation == m.main.generation {
 			if msg.err != nil {
 				m.status = "Refresh paused: " + msg.err.Error()
