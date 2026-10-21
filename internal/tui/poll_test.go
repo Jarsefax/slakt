@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -116,5 +117,48 @@ func TestPollFooterFitsAndRoundsUpRemainingSeconds(t *testing.T) {
 		if width, _ := lipgloss.Size(frame); width > m.width {
 			t.Fatalf("footer overflow: frame width %d, terminal width %d", width, m.width)
 		}
+	}
+}
+
+func TestVersionFooter(t *testing.T) {
+	for _, version := range []string{"0.16.0", "0.16.0-dev+abcdef012345.dirty.src.abcdef012345"} {
+		for _, width := range []int{40, 70, 140} {
+			for _, polling := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/width=%d/polling=%t", version, width, polling), func(t *testing.T) {
+					m := loadedModel(t)
+					m.options.Version = version
+					m.width, m.polling = width, polling
+					m.nextPoll = time.Now().Add(time.Hour)
+					frame := m.View()
+					lines := strings.Split(ansi.Strip(frame), "\n")
+					footer := lines[len(lines)-1]
+					if !strings.HasPrefix(footer, " "+m.pollIndicator(time.Now())) || !strings.Contains(footer, "slkt 0.16.0") {
+						t.Fatalf("poll indicator or version missing: %q", footer)
+					}
+					if ansi.StringWidth(footer) != width || strings.HasSuffix(footer, " ") {
+						t.Fatalf("version is not aligned to the right edge at width %d: %q", width, footer)
+					}
+					if !strings.Contains(version, "-dev") || width == 140 {
+						if !strings.HasSuffix(footer, "slkt "+version) || !strings.Contains(footer, m.identity.User) {
+							t.Fatalf("full version or identity missing: %q", footer)
+						}
+					}
+					if frameWidth, _ := lipgloss.Size(frame); frameWidth > width {
+						t.Fatalf("frame width %d exceeds terminal width %d", frameWidth, width)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestVersionFooterFitsLongUnicodeIdentity(t *testing.T) {
+	m := loadedModel(t)
+	m.options.Version = "0.16.0"
+	m.width, m.polling = 40, true
+	m.identity.User = strings.Repeat("同僚", 20)
+	footer := m.footer(time.Now())
+	if ansi.StringWidth(footer) != m.width || !strings.HasSuffix(footer, "slkt 0.16.0") || !strings.HasPrefix(footer, " "+m.pollIndicator(time.Now())) {
+		t.Fatalf("long identity displaced the poll indicator or version: %q", footer)
 	}
 }

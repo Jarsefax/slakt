@@ -35,6 +35,7 @@ type Options struct {
 	PollInterval time.Duration
 	Demo         bool
 	Store        *localdata.Store
+	Version      string
 }
 
 type view struct {
@@ -227,6 +228,21 @@ func (m model) pollIndicator(now time.Time) string {
 	}
 	return fmt.Sprintf("poll [%s%s] %ds", strings.Repeat("■", filled), strings.Repeat("□", 5-filled), seconds)
 }
+
+func (m model) footer(now time.Time) string {
+	poll := " " + m.pollIndicator(now)
+	if m.options.Version == "" {
+		return fit(poll+" · "+m.identity.User, m.width)
+	}
+	version := fit("slkt "+m.options.Version, m.width-ansi.StringWidth(poll)-1)
+	left := poll
+	remaining := m.width - ansi.StringWidth(version) - 1 - ansi.StringWidth(poll)
+	if remaining > 3 && m.identity.User != "" {
+		left += " · " + fit(m.identity.User, remaining-3)
+	}
+	return left + strings.Repeat(" ", m.width-ansi.StringWidth(left)-ansi.StringWidth(version)) + version
+}
+
 func (m model) directoryCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(m.ctx, 2*time.Minute)
@@ -1503,6 +1519,6 @@ func (m model) View() string {
 	if m.storageError != "" {
 		statusText = m.storageError
 	}
-	status := muted.Render(" "+fit(statusText, m.width-3)) + "\n" + muted.Render(fit(fmt.Sprintf(" %s · %s", m.pollIndicator(time.Now()), m.identity.User), m.width))
+	status := muted.Render(" "+fit(statusText, m.width-3)) + "\n" + muted.Render(m.footer(time.Now()))
 	return header + "\n" + separator(m.width) + "\n" + body + "\n" + separator(m.width) + "\n" + bottom + "\n" + status
 }

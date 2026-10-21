@@ -82,6 +82,7 @@ def main():
     fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 140, 0, 0))
     environment = dict(os.environ, TERM="xterm-256color", NO_COLOR="1")
     binary = sys.argv[1] if len(sys.argv) > 1 else "./bin/slkt"
+    version = subprocess.check_output([binary, "--version"], text=True).strip().removeprefix("slkt version ")
     process = subprocess.Popen(
         [binary, "--demo"], stdin=slave, stdout=slave, stderr=slave,
         env=environment, start_new_session=True,
@@ -101,6 +102,7 @@ def main():
     try:
         initial = read(1)
         assert "OFFLINE DEMO" in initial, "initial demo frame missing"
+        assert f"slkt {version}" in initial, "footer version differs from --version"
         for section in ("Starred", "Channels", "Direct messages", "Group messages"):
             assert section in initial, f"sidebar section missing: {section}"
         send(b"\t")

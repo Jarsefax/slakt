@@ -341,7 +341,7 @@ func (o *options) openTUI(cmd *cobra.Command, c *core.Conversation) error {
 	if err != nil {
 		return err
 	}
-	return tui.Run(cmd.Context(), s, tui.Options{Initial: c, PollInterval: o.poll, Demo: o.demo})
+	return tui.Run(cmd.Context(), s, tui.Options{Initial: c, PollInterval: o.poll, Demo: o.demo, Version: cmd.Root().Version})
 }
 
 func printMessages(w io.Writer, messages []core.Message, names map[string]string) {
