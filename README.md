@@ -214,8 +214,9 @@ Leaving sidebar browsing also releases the retained row.
 
 Press `r` while browsing an open channel or DM, including its thread, to mark
 that conversation read locally without changing focus, selection, scroll position,
-or drafts. Search results must be closed first. Use `e` to add an emoji reaction
-to the selected message.
+or drafts. This also clears its **New messages** divider; later arrivals can
+create a fresh divider. Search results must be closed first. Use `e` to add an
+emoji reaction to the selected message.
 
 Messages in an open conversation are marked read as they arrive while browsing
 its timeline. Read tracking pauses while the conversation sidebar has focus,
@@ -239,9 +240,11 @@ than the local read position captured when you opened the conversation or its
 sidebar preview. The view opens at the first new message in the loaded history,
 with a little older context above it when space permits. The divider stays at
 that boundary for the visit, including after automatic read marking, refreshes,
-and resizing. New arrivals appear below the same boundary. Opening the
-conversation again captures a fresh read position; a fully read conversation
-opens at its latest message. Use `n` to load earlier history when needed.
+and resizing. New arrivals appear below the same boundary. Pressing `r` in the
+open conversation clears its divider and resets the boundary to the new read
+position. Sidebar `r` preserves its preview's divider. Opening the conversation
+again captures a fresh read position; a fully read conversation opens at its
+latest message. Use `n` to load earlier history when needed.
 Thread-only replies and search results have no local unread boundary.
 
 Unread tracking belongs to slkt and does not read or change Slack's read markers.

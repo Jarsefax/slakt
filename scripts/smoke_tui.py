@@ -147,7 +147,12 @@ def main():
         assert "@alice" in send(b"\r"), "DM did not open"
         send(b"i")
         send(b"Offline PTY DM smoke test.")
-        assert "Message sent" in send(b"\x13"), "demo DM send failed"
+        sent_dm = send(b"\x13")
+        assert "Message sent" in sent_dm, "demo DM send failed"
+        assert "New messages" in sent_dm, "new DM message did not create a divider"
+        marked_dm = send(b"r")
+        assert "Marked @alice read" in marked_dm, "r did not mark the open DM read"
+        assert "New messages" not in marked_dm, "r left the new-message divider visible"
         send(b"\t")
         assert "Hidden @alice" in send(b"h"), "sidebar did not hide the selected DM"
         send(b"m")  # Visible -> Unread first

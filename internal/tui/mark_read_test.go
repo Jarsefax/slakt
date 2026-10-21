@@ -257,9 +257,12 @@ func TestOpenConversationMarkReadPreservesViewAndDraft(t *testing.T) {
 			}
 			assertBrowsing(t, m)
 			if m.main.selected != before.selected || m.main.viewport.YOffset != before.viewport.YOffset ||
-				m.main.newAfter != before.newAfter || !reflect.DeepEqual(m.main.messages, messages) ||
+				!reflect.DeepEqual(m.main.messages, messages) ||
 				!reflect.DeepEqual(m.drafts, drafts) || m.composer.Value() != "remember this draft" {
-				t.Fatal("marking read changed the timeline, unread boundary, or draft")
+				t.Fatal("marking read changed the timeline or draft")
+			}
+			if m.main.newAfter != m.readState.Position(channel) || m.main.newIndex != -1 || strings.Contains(messageViewContent(m.main), "New messages") {
+				t.Fatal("marking read did not clear the open conversation's divider")
 			}
 			read[channel] = "2000000000.000004"
 			stored, err := store.LoadReadState(m.ctx, m.identity.TeamID, m.identity.UserID)
@@ -282,6 +285,8 @@ func TestThreadMarkReadUsesConversationHistoryAndPreservesThread(t *testing.T) {
 			m.main.startup = true
 			channel := m.main.conversation.ID
 			m.observeLatest(channel, "2000000000.000004")
+			m.main.newAfter = "1000000000.000001"
+			m.rebuild(&m.main, true)
 			// Thread-only replies must not advance the conversation's read position.
 			m.thread.messages = slices.Clone(m.thread.messages)
 			m.thread.messages[len(m.thread.messages)-1].Timestamp = "3000000000.000005"
@@ -291,6 +296,9 @@ func TestThreadMarkReadUsesConversationHistoryAndPreservesThread(t *testing.T) {
 			m, cmd := key(m, "r")
 			if cmd != nil || m.main.startup || m.isUnread(channel) || m.readState.Position(channel) != "2000000000.000004" {
 				t.Fatal("r in a thread did not mark its containing conversation read")
+			}
+			if m.main.newIndex != -1 || m.main.newAfter != m.readState.Position(channel) || strings.Contains(messageViewContent(m.main), "New messages") {
+				t.Fatal("r in a thread did not clear its containing conversation's divider")
 			}
 			if m.thread != thread || !reflect.DeepEqual(m.thread.messages, before.messages) || m.thread.selected != before.selected || m.thread.viewport.YOffset != before.viewport.YOffset {
 				t.Fatal("marking read closed or changed the thread")

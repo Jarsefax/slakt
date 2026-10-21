@@ -130,6 +130,89 @@ func TestNewMessagesBoundarySurvivesVisitAndResetsOnReopen(t *testing.T) {
 	}
 }
 
+func TestExplicitMarkReadClearsDividerAndAllowsNewArrivals(t *testing.T) {
+	for _, state := range []struct {
+		name    string
+		startup bool
+		allNew  bool
+	}{
+		{name: "browsing"},
+		{name: "startup", startup: true},
+		{name: "all new", allNew: true},
+		{name: "startup all new", startup: true, allNew: true},
+	} {
+		for _, width := range []int{70, 140} {
+			t.Run(fmt.Sprintf("%s/%d", state.name, width), func(t *testing.T) {
+				m, b := newMessagesModel(t)
+				m.width = width
+				if state.allNew {
+					m.readState.LastRead["CGENERAL"] = "2000000000.000000"
+				}
+				open := m.switchTo
+				if state.startup {
+					open = m.switchToStartup
+				}
+				load := open(core.Conversation{ID: "CGENERAL", Name: "general", Kind: "channel"})
+				updated, _ := m.Update(load())
+				m = updated.(model)
+				if m.main.newIndex < 0 || !strings.Contains(messageViewContent(m.main), "New messages") {
+					t.Fatal("test conversation did not start with a new-message divider")
+				}
+				// Scroll inside a message below the divider so removing the first
+				// row of entirely new history must retain the same visual anchor.
+				m.main.selected = 9
+				m.rebuild(&m.main, true)
+				m.main.viewport.SetYOffset(m.main.starts[9] + 1)
+				selected := m.main.messages[9].Timestamp
+				delta := m.main.viewport.YOffset - m.main.starts[9]
+				after := b.page.Messages[19].Timestamp
+				m, _ = key(m, "r")
+				if m.main.startup || m.main.newAfter != after || m.main.newIndex != -1 || strings.Contains(messageViewContent(m.main), "New messages") {
+					t.Fatal("r did not reset the boundary and remove the divider")
+				}
+				if m.main.messages[m.main.selected].Timestamp != selected || m.main.viewport.YOffset-m.main.starts[m.main.selected] != delta {
+					t.Fatal("clearing the divider moved the selected message or scroll anchor")
+				}
+				updated, _ = m.Update(tea.WindowSizeMsg{Width: width + 5, Height: m.height})
+				m = updated.(model)
+				if m.main.newIndex != -1 || strings.Contains(messageViewContent(m.main), "New messages") {
+					t.Fatal("resizing brought back the cleared divider")
+				}
+				arrival := core.Message{ChannelID: "CGENERAL", Timestamp: "2000000000.000021", Text: "After explicit mark read"}
+				updated, _ = m.Update(pollResult{channel: "CGENERAL", generation: m.main.generation, main: []core.Message{arrival}})
+				m = updated.(model)
+				if m.main.newAfter != after || m.main.newIndex != 20 || strings.Count(messageViewContent(m.main), "New messages") != 1 || m.isUnread("CGENERAL") {
+					t.Fatal("later arrival did not create a fresh divider while normal read tracking resumed")
+				}
+				m, _ = key(m, "r")
+				if m.main.newAfter != arrival.Timestamp || m.main.newIndex != -1 || strings.Contains(messageViewContent(m.main), "New messages") {
+					t.Fatal("a second r did not clear the fresh divider")
+				}
+			})
+		}
+	}
+}
+
+func TestExplicitMarkReadRestoresTodayAtSharedDivider(t *testing.T) {
+	m, b := newMessagesModel(t)
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	older, fresh := messageAt(start.Add(-time.Minute)), messageAt(start)
+	b.page.Messages = []core.Message{older, fresh, messageAt(start.Add(time.Minute))}
+	m.latest["CGENERAL"] = newestTimestamp(b.page.Messages)
+	m.readState.StartedAt = older.Timestamp
+	m.readState.LastRead["CGENERAL"] = older.Timestamp
+	m = openGeneral(t, m)
+	if m.main.newIndex != 1 || m.main.todayIndex != 1 {
+		t.Fatal("test conversation did not start with a shared divider")
+	}
+	m, _ = key(m, "r")
+	content := messageViewContent(m.main)
+	if m.main.newIndex != -1 || m.main.todayIndex != 1 || strings.Contains(content, "New messages") || !strings.Contains(content, ansi.Strip(todaySeparator(m.main.viewport.Width))) {
+		t.Fatal("clearing the shared new-message divider did not restore Today")
+	}
+}
+
 func TestNewMessagesNavigationAndPaginationKeepBoundaryVisible(t *testing.T) {
 	m, b := newMessagesModel(t)
 	m.height = 15

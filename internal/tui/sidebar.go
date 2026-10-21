@@ -137,6 +137,8 @@ func (m *model) markOpenConversationRead() {
 		return
 	}
 	m.markConversationRead(&m.main)
+	m.main.newAfter = m.readState.Position(m.main.conversation.ID)
+	m.rebuild(&m.main, true)
 }
 
 func (m *model) markConversationRead(v *view) {
