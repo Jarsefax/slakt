@@ -9,11 +9,6 @@ import (
 )
 
 func (m model) pollIndicator(now time.Time) string {
-	text, _ := m.pollDisplay(now)
-	return text
-}
-
-func (m model) pollDisplay(now time.Time) (string, int) {
 	conversation := m.main.conversation
 	thread := m.thread != nil && m.thread.thread != ""
 	if m.polling && m.pollCurrent.ID != "" {
@@ -38,25 +33,8 @@ func (m model) pollDisplay(now time.Time) (string, int) {
 	interval := m.options.PollInterval.String()
 	remaining := min(max(0, m.options.PollInterval), max(0, m.nextPoll.Sub(now)))
 	seconds, maximum := secondsUntil(remaining), secondsUntil(max(0, m.options.PollInterval))
-	compactWidth := max(len(fmt.Sprintf("%ds/%s", maximum, interval)), ansi.StringWidth("polling…"))
 	minimumName := min(4, ansi.StringWidth(name))
-	minimum := len("poll ") + minimumName + len(threadLabel) + 1 + compactWidth
-	width := m.width - 1
-	if m.width >= unreadInlineWidth {
-		width -= 3 + unreadMinimumWidth
-	}
-	if m.options.Version != "" {
-		// Prefer the full version when possible, retaining its base at 40 columns.
-		versionWidth := min(ansi.StringWidth("slkt "+m.options.Version), max(11, width-minimum-1))
-		width -= versionWidth + 1
-	}
-	if m.identity.User != "" {
-		identityWidth := min(16, ansi.StringWidth(fit(m.identity.User, 16)), max(0, width-minimum-3))
-		if identityWidth > 0 {
-			width -= identityWidth + 3
-		}
-	}
-	width = max(1, width)
+	width := max(1, m.width-1)
 	shortestStateWidth := max(len(fmt.Sprintf("%ds", maximum)), ansi.StringWidth("polling…"))
 	minimumName = min(minimumName, max(1, width-len("poll ")-len(threadLabel)-1-shortestStateWidth))
 	filled := 0
@@ -66,8 +44,9 @@ func (m model) pollDisplay(now time.Time) (string, int) {
 		filled = int(5 * (1 - float64(remaining)/float64(m.options.PollInterval)))
 	}
 	bar := " [" + strings.Repeat("■", filled) + strings.Repeat("□", 5-filled) + "] "
-	// Pick a format using the longest state, so unread labels do not move
-	// between the countdown and a running request. Only the name is shortened.
+	// Pick a format using the longest state, so the available space stays
+	// consistent between the countdown and a running request. Only the name
+	// is shortened.
 	for _, format := range []struct {
 		separator, countdown, suffix string
 	}{
@@ -89,11 +68,11 @@ func (m model) pollDisplay(now time.Time) (string, int) {
 			state = "waiting"
 		}
 		text := "poll " + label + format.separator + state + format.suffix
-		return text, len("poll ") + ansi.StringWidth(label+format.separator) + stateWidth
+		return text
 	}
 	state := "waiting"
 	if m.polling {
 		state = "polling…"
 	}
-	return fit("poll "+name+threadLabel+" "+state, width), width
+	return fit("poll "+name+threadLabel+" "+state, width)
 }

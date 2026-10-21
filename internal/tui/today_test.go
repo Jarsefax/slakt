@@ -134,6 +134,7 @@ func TestTodaySeparatorPreservesNavigationAndHistoryAnchors(t *testing.T) {
 	m.height = 15
 	m.main.newAfter = ""
 	m.main.messages = []core.Message{messageAt(start), messageAt(start.Add(time.Minute))}
+	m.main.messages[1].Text = strings.Repeat("Later message\n", 4)
 	m.main.selected = 0
 	m.rebuild(&m.main, false)
 	m.main.viewport.GotoBottom()
@@ -143,6 +144,9 @@ func TestTodaySeparatorPreservesNavigationAndHistoryAnchors(t *testing.T) {
 	}
 
 	m.main.viewport.SetYOffset(m.main.starts[0] + 1)
+	if m.main.viewport.YOffset != m.main.starts[0]+1 {
+		t.Fatal("fixture needs enough content below the scroll anchor")
+	}
 	selected := m.main.messages[0].Timestamp
 	m.merge(&m.main, []core.Message{messageAt(start.Add(-time.Minute))}, false, true)
 	if m.main.messages[m.main.selected].Timestamp != selected || m.main.viewport.YOffset != m.main.starts[1]+1 {

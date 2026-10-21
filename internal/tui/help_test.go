@@ -168,12 +168,13 @@ func TestHelpFitsAndKeepsTheWorkspaceVisible(t *testing.T) {
 				if !strings.Contains(ansi.Strip(frame), "Help ·") || !strings.Contains(ansi.Strip(frame), "Esc/F1 close") {
 					t.Fatalf("modal or close hint missing: %s", frame)
 				}
-				if size[1] >= 24 && !strings.Contains(ansi.Strip(frame), "slkt 0.19.0") {
+				// Input help can cover the branding above the composer or prompt.
+				if size[1] >= 24 && m.mode == "" && !strings.Contains(ansi.Strip(frame), "slakt 0.19.0") {
 					t.Fatalf("background footer missing: %s", frame)
 				}
 				buffer := cellbuf.NewBuffer(size[0], size[1])
 				cellbuf.SetContent(buffer, frame)
-				if buffer.Cell(1, 0).Rune != 's' { // Header remains above the centered panel.
+				if buffer.Cell(1, 0).Rune != 'O' { // Offline workspace header remains above the centered panel.
 					t.Fatal("help replaced the workspace header")
 				}
 			})

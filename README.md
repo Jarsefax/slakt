@@ -156,6 +156,10 @@ channel. Referring to a DM as `@person` can open that DM through
 `conversations.open`. Errors go to stderr. Exit status is 0 on success,
 1 on failure, and 130 on interruption. Without a terminal, specify a subcommand.
 
+The TUI header shows the workspace on the left and your account name on the
+right. Long names are shortened to fit the terminal. The app name and version
+sit at the top-right of the footer, beside the help and quit hints.
+
 The TUI sidebar and plain-text `channels` output group conversations into
 **Starred**, **Channels** (public and private), **Direct messages**, and
 **Group messages**, with names sorted within each section. Empty sections are
@@ -402,11 +406,10 @@ expansion. Unsaved drafts do not survive process exit or a crash.
   dropping the bar when needed. Highlighting a sidebar preview does not change
   the poll target; Enter opens that conversation. A running refresh keeps its
   original target label until it finishes.
-- Beside the poll countdown, the unread status keeps `next` first and `checking`
-  in fixed positions, shortening long names within their slots. Between checks,
+- Below the poll countdown, the unread status groups `next` and `checking`
+  together with a ` · ` separator, shortening long names to fit. Between checks,
   `next` counts down to the next request and `checking` shows `—`. The countdown
-  starts when the previous request finishes. At narrow widths both slots use a
-  separate compact line.
+  starts when the previous request finishes.
 - Inactive conversations are checked one at a time for local unread indicators,
   requesting at most one history item per check. Checks are at least three seconds
   apart (slower if configured polling permits), starting at most 20 checks

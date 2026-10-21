@@ -221,42 +221,17 @@ func pollCountdownTick() tea.Cmd {
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { return pollCountdownMsg{} })
 }
 
-func (m model) footer(now time.Time) string {
-	indicator, pollWidth := m.pollDisplay(now)
-	poll := " " + indicator
-	// Keep the unread slots still when the active poll starts or completes.
-	poll += strings.Repeat(" ", max(0, pollWidth-ansi.StringWidth(indicator)))
-	versionWidth := m.width - ansi.StringWidth(poll) - 1
-	if m.width >= unreadInlineWidth {
-		// Reserve a readable unread status before fitting a development version.
-		versionWidth -= 3 + unreadMinimumWidth
+func (m model) footer() string {
+	hints := m.commandHints()
+	if m.width <= ansi.StringWidth(hints)+2 {
+		return fit(hints, m.width)
 	}
-	version := ""
+	brand := "slakt"
 	if m.options.Version != "" {
-		version = fit("slkt "+m.options.Version, versionWidth)
+		brand += " " + m.options.Version
 	}
-	left := poll
-	remaining := m.width - ansi.StringWidth(left)
-	if version != "" {
-		remaining -= ansi.StringWidth(version) + 1
-	}
-	if m.width >= unreadInlineWidth {
-		identityWidth := min(16, ansi.StringWidth(fit(m.identity.User, 16)), max(0, remaining-3-unreadMinimumWidth-3))
-		unreadWidth := remaining - 3
-		if identityWidth > 0 {
-			unreadWidth -= 3 + identityWidth
-		}
-		unread := m.unreadIndicator(now, unreadWidth)
-		left += " · " + unread
-		remaining -= 3 + ansi.StringWidth(unread)
-	}
-	if remaining > 3 && m.identity.User != "" {
-		left += " · " + fit(m.identity.User, remaining-3)
-	}
-	if version == "" {
-		return fit(left, m.width)
-	}
-	return left + strings.Repeat(" ", m.width-ansi.StringWidth(left)-ansi.StringWidth(version)) + version
+	brand = fit(brand, m.width-ansi.StringWidth(hints)-2)
+	return hints + strings.Repeat(" ", m.width-ansi.StringWidth(hints)-ansi.StringWidth(brand)) + brand
 }
 
 func (m model) directoryCmd() tea.Cmd {
@@ -299,8 +274,9 @@ func (m *model) numbersVisible(v *view) bool {
 }
 
 func (m *model) refreshViews(now time.Time) {
+	_, _, height := m.dimensions()
 	for _, v := range []*view{&m.main, &m.search, m.thread, m.preview} {
-		if v != nil && (v.numbered != m.numbersVisible(v) || v.day != now.Format("2006-01-02")) {
+		if v != nil && (v.numbered != m.numbersVisible(v) || v.day != now.Format("2006-01-02") || v.viewport.Height != height) {
 			m.rebuildAt(v, true, now)
 		}
 	}
@@ -448,16 +424,10 @@ func (m *model) dimensions() (int, int, int) {
 		side = 23
 	}
 	content := max(20, m.width-side-3)
-	height := max(3, m.height-12)
-	if m.width < unreadInlineWidth {
-		height = max(2, m.height-13)
-	}
-	// Leave room for the composer instructions and the always-visible help hint.
-	if m.mode == "compose" && m.height >= 20 {
-		height = max(1, height-2)
-	} else if m.mode == "jump" {
-		height = max(1, height-1)
-	}
+	// Header and separator, pane caption/separator/count, bottom separator,
+	// and status/poll/unread rows use nine rows outside the message viewport.
+	// Reserve input space only while its contents are actually visible.
+	height := max(1, m.height-9-lipgloss.Height(m.bottomView(content)))
 	return side, content, height
 }
 
@@ -1460,42 +1430,7 @@ func pane(v view, width, height int, label string) string {
 	}()))
 }
 
-func (m model) View() string {
-	if m.width < 40 || m.height < 15 {
-		return "slakt needs at least a 40×15 terminal. Resize, or press q to quit."
-	}
-	side, width, height := m.dimensions()
-	badge := m.identity.Team
-	if badge == "" {
-		badge = "your terminal workspace"
-	}
-	if m.options.Demo {
-		badge = "OFFLINE DEMO · nothing reaches Slack"
-	}
-	header := accent.Bold(true).Render(" slakt ") + muted.Render(" / "+fit(badge, max(10, m.width-15)))
-	var body string
-	v := m.main
-	label := m.main.conversation.Label()
-	if m.searchActive && !m.sidebar {
-		v = m.search
-		label = fmt.Sprintf("Search: %s · %d matches · %d/%d", m.searchQuery, m.searchTotal, m.searchPage, max(1, m.searchPages))
-	}
-	if m.preview != nil {
-		v = *m.preview
-		label = "Preview · " + v.conversation.Label()
-	}
-	if m.thread != nil && m.width >= 125 {
-		left := (width - 3) / 2
-		right := width - left - 3
-		body = lipgloss.JoinHorizontal(lipgloss.Top, pane(v, left, height, label), accent.Render(" │ "), pane(*m.thread, right, height, "Thread · "+m.thread.conversation.Label()))
-	} else if m.thread != nil && !m.sidebar {
-		body = pane(*m.thread, width, height, "Thread · "+m.thread.conversation.Label()+" · Esc back")
-	} else {
-		body = pane(v, width, height, label)
-	}
-	if side > 0 {
-		body = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(side-1, height+3), " ", body)
-	}
+func (m model) bottomView(width int) string {
 	var bottom string
 	switch m.mode {
 	case "compose":
@@ -1537,9 +1472,56 @@ func (m model) View() string {
 		}
 	}
 	if bottom != "" {
-		bottom += "\n"
+		return muted.Render(m.footer()) + "\n" + bottom
 	}
-	bottom += muted.Render(fit(m.commandHints(), m.width))
+	return muted.Render(m.footer())
+}
+
+func (m model) View() string {
+	if m.width < 40 || m.height < 15 {
+		return "slakt needs at least a 40×15 terminal. Resize, or press q to quit."
+	}
+	side, width, height := m.dimensions()
+	badge := m.identity.Team
+	if badge == "" {
+		badge = "your terminal workspace"
+	}
+	if m.options.Demo {
+		badge = "OFFLINE DEMO · nothing reaches Slack"
+	}
+	user := fit(m.identity.User, max(1, m.width/3))
+	badgeWidth := m.width - 1
+	if user != "" {
+		badgeWidth -= ansi.StringWidth(user) + 2
+	}
+	header := accent.Bold(true).Render(" " + fit(badge, badgeWidth))
+	if user != "" {
+		header += strings.Repeat(" ", m.width-ansi.StringWidth(header)-ansi.StringWidth(user)) + muted.Render(user)
+	}
+	var body string
+	v := m.main
+	label := m.main.conversation.Label()
+	if m.searchActive && !m.sidebar {
+		v = m.search
+		label = fmt.Sprintf("Search: %s · %d matches · %d/%d", m.searchQuery, m.searchTotal, m.searchPage, max(1, m.searchPages))
+	}
+	if m.preview != nil {
+		v = *m.preview
+		label = "Preview · " + v.conversation.Label()
+	}
+	if m.thread != nil && m.width >= 125 {
+		left := (width - 3) / 2
+		right := width - left - 3
+		body = lipgloss.JoinHorizontal(lipgloss.Top, pane(v, left, height, label), accent.Render(" │ "), pane(*m.thread, right, height, "Thread · "+m.thread.conversation.Label()))
+	} else if m.thread != nil && !m.sidebar {
+		body = pane(*m.thread, width, height, "Thread · "+m.thread.conversation.Label()+" · Esc back")
+	} else {
+		body = pane(v, width, height, label)
+	}
+	if side > 0 {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(side-1, height+3), " ", body)
+	}
+	bottom := m.bottomView(width)
 
 	statusText := m.status
 	if m.previewError != "" {
@@ -1553,10 +1535,8 @@ func (m model) View() string {
 	}
 	now := time.Now()
 	status := muted.Render(" " + fit(statusText, m.width-3))
-	if m.width < unreadInlineWidth {
-		status += "\n" + muted.Render(" "+m.unreadIndicator(now, m.width-1))
-	}
-	status += "\n" + muted.Render(m.footer(now))
+	status += "\n" + muted.Render(" "+m.pollIndicator(now))
+	status += "\n" + muted.Render(" "+m.unreadIndicator(now, m.width-1))
 	frame := header + "\n" + separator(m.width) + "\n" + body + "\n" + separator(m.width) + "\n" + bottom + "\n" + status
 	if m.help {
 		return m.helpOverlay(frame)

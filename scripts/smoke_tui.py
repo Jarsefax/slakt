@@ -103,7 +103,7 @@ def main():
     try:
         initial = read(1)
         assert "OFFLINE DEMO" in initial, "initial demo frame missing"
-        assert f"slkt {version}" in initial, "footer version differs from --version"
+        assert f"slakt {version}" in initial, "footer version differs from --version"
         assert "poll #engineering [" in initial and ("interval 15s" in initial or "/15s" in initial), "open conversation poll target/interval missing from footer"
         assert re.search(r"unread: next #[^\r\n]+? in \d+s · checking ", initial), "unread queue/countdown missing from footer"
         assert "checking —" in initial, "idle checking slot missing from footer"
@@ -182,7 +182,7 @@ def main():
         narrow = send(b"\x1b")  # Close the overlay to inspect the small footer.
         assert "unread: next " in narrow and " · checking " in narrow, "compact unread slots missing at the minimum terminal size"
         base_version = re.split(r"[-+]", version, maxsplit=1)[0]
-        assert f"slkt {base_version}" in narrow, "compact unread status displaced the version"
+        assert f"slakt {base_version}" in narrow, "compact unread status displaced the version"
         send(b"q")
         assert process.wait(timeout=3) == 0, "TUI exited unsuccessfully"
         print("PASS: startup r mark read, e emoji reaction, grouped sidebar/navigation, message numbers, thread indicators, channel jump, formatted thread send with emoji, search/result thread, DM send, hide/unhide and five sidebar modes, resize, help, quit (offline PTY)")

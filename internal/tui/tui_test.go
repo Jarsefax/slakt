@@ -289,9 +289,13 @@ func TestHybridNumbersAndScrollAnchorSurvivePaginationAndUpdates(t *testing.T) {
 	m := loadedModel(t)
 	m.height = 15
 	m.main.messages = []core.Message{{Timestamp: "2.000001"}, {Timestamp: "3.000001"}, {Timestamp: "4.000001"}}
+	m.main.messages[2].Text = strings.Repeat("Later message\n", 4)
 	m.main.selected = 1
 	m.rebuild(&m.main, false)
 	m.main.viewport.SetYOffset(m.main.starts[1] + 1)
+	if m.main.viewport.YOffset != m.main.starts[1]+1 {
+		t.Fatal("fixture needs enough content below the scroll anchor")
+	}
 	m.merge(&m.main, []core.Message{{Timestamp: "1.000001"}}, false, true)
 	assertMessageNumbers(t, m.main, []string{"2", "1", "3", "1"})
 	if m.main.messages[m.main.selected].Timestamp != "3.000001" || m.main.viewport.YOffset != m.main.starts[2]+1 {
@@ -441,6 +445,46 @@ func TestResponsiveViews(t *testing.T) {
 	}
 }
 
+func TestHeaderPlacesAccountAtRight(t *testing.T) {
+	for _, width := range []int{40, 80, 140} {
+		for _, test := range []struct {
+			name, team, user, badge string
+			demo, shortened         bool
+		}{
+			{name: "account", team: "Workspace", user: "Roger", badge: "Workspace"},
+			{name: "unicode account", team: "Workspace", user: "同僚👩🏽‍💻", badge: "Workspace"},
+			{name: "long account", team: "Workspace", user: strings.Repeat("同僚👩🏽‍💻", 30), badge: "Workspace", shortened: true},
+			{name: "long workspace", team: strings.Repeat("Workspace", 30), user: "Roger", badge: "Workspace"},
+			{name: "connecting", user: "Roger", badge: "your terminal workspace"},
+			{name: "demo", team: "Workspace", user: "Roger", badge: "OFFLINE DEMO", demo: true},
+			{name: "no account", team: "Workspace", badge: "Workspace"},
+		} {
+			t.Run(fmt.Sprintf("width=%d/%s", width, test.name), func(t *testing.T) {
+				m := loadedModel(t)
+				m.width, m.options.Demo = width, test.demo
+				m.identity.Team, m.identity.User = test.team, test.user
+				header := strings.Split(ansi.Strip(m.View()), "\n")[0]
+				if !strings.HasPrefix(header, " "+test.badge) || ansi.StringWidth(header) > width || strings.Contains(header, "slakt") {
+					t.Fatalf("header lost the workspace or overflowed: %q", header)
+				}
+				if test.user == "" {
+					return
+				}
+				if ansi.StringWidth(header) != width {
+					t.Fatalf("account is not at the right edge: %q", header)
+				}
+				if test.shortened {
+					if !strings.HasSuffix(header, "…") || !strings.Contains(header, "  同僚") {
+						t.Fatalf("long account was not shortened separately from the workspace: %q", header)
+					}
+				} else if !strings.HasSuffix(header, "  "+test.user) {
+					t.Fatalf("account missing or touching the workspace: %q", header)
+				}
+			})
+		}
+	}
+}
+
 func TestCacheBoundDoesNotPreventBrowsingOlderHistory(t *testing.T) {
 	m := loadedModel(t)
 	m.main.messages = nil
@@ -474,8 +518,8 @@ func TestConfirmedReactionAppearsWithoutMutatingSnapshots(t *testing.T) {
 }
 
 func TestFramesFitTerminal(t *testing.T) {
-	for _, size := range [][2]int{{40, 15}, {79, 24}, {80, 24}, {125, 30}, {126, 30}, {140, 40}} {
-		for _, mode := range []string{"normal", "help", "compose", "jump", "search-thread", "numbered-thread"} {
+	for _, size := range [][2]int{{40, 15}, {40, 19}, {40, 20}, {79, 24}, {80, 15}, {80, 20}, {80, 24}, {125, 30}, {126, 30}, {140, 40}} {
+		for _, mode := range []string{"normal", "help", "compose", "sending", "draft", "jump", "jump-empty", "jump-last", "search", "react", "search-thread", "numbered-thread"} {
 			m := loadedModel(t)
 			mm, _ := m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 			m = mm.(model)
@@ -484,8 +528,20 @@ func TestFramesFitTerminal(t *testing.T) {
 				m.help = true
 			case "compose":
 				m.mode = "compose"
+			case "sending":
+				m.mode, m.sending = "compose", true
+			case "draft":
+				m.drafts[draftKey(m.main.conversation.ID, "")] = "Saved draft"
 			case "jump":
 				m.mode = "jump"
+			case "jump-empty":
+				m.mode = "jump"
+				m.input.SetValue("no-such-destination")
+			case "jump-last":
+				m.mode = "jump"
+				m.sideIndex = len(m.choices("")) - 1
+			case "search", "react":
+				m.mode = mode
 			case "search-thread":
 				m.searchActive = true
 				m.search.messages = m.main.messages
@@ -505,11 +561,40 @@ func TestFramesFitTerminal(t *testing.T) {
 				assertNoMessageNumbers(t, m.main)
 			}
 			frame := m.View()
-			if width, height := lipgloss.Size(frame); width > size[0] || height > size[1] {
-				t.Errorf("%s %v: frame is %dx%d", mode, size, width, height)
+			if width, height := lipgloss.Size(frame); width > size[0] || height != size[1] {
+				t.Errorf("%s %v: frame is %dx%d; it must fit the width and use every row", mode, size, width, height)
 			}
 		}
 	}
+}
+
+func TestInputHeightChangesResizeTheMessageViewport(t *testing.T) {
+	m := loadedModel(t)
+	fullHeight := m.main.viewport.Height
+	check := func(want int) {
+		t.Helper()
+		if m.main.viewport.Height != want {
+			t.Fatalf("message viewport has %d rows, want %d in %s", m.main.viewport.Height, want, m.mode)
+		}
+		if height := lipgloss.Height(m.View()); height != m.height {
+			t.Fatalf("frame has %d rows, want %d in %s", height, m.height, m.mode)
+		}
+	}
+	m, _ = key(m, "ctrl+k")
+	check(fullHeight - 4)
+	m, _ = key(m, "no-such-destination")
+	check(fullHeight - 1)
+	m, _ = key(m, "esc")
+	check(fullHeight)
+	m, _ = key(m, "i")
+	check(fullHeight - 5)
+	m, _ = key(m, "A message")
+	check(fullHeight - 5)
+	m, send := key(m, "ctrl+s")
+	check(fullHeight - 4)
+	updated, _ := m.Update(send())
+	m = updated.(model)
+	check(fullHeight)
 }
 
 func TestEmojiMessagesFitTerminal(t *testing.T) {

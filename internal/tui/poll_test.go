@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Jarsefax/slakt/internal/core"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -111,9 +112,9 @@ func TestPollFooterFitsAndRoundsUpRemainingSeconds(t *testing.T) {
 		m.width = 40
 		frame := m.View()
 		lines := strings.Split(ansi.Strip(frame), "\n")
-		footer := lines[len(lines)-1]
-		if !strings.HasPrefix(footer, " poll #engineeri") || !strings.Contains(footer, m.identity.User) {
-			t.Fatalf("poll indicator or identity missing from footer: %q", footer)
+		footer := lines[len(lines)-2]
+		if !strings.HasPrefix(footer, " "+m.pollIndicator(time.Now())) || strings.Contains(footer, m.identity.User) {
+			t.Fatalf("footer lost the poll indicator or still contains the account name: %q", footer)
 		}
 		if width, _ := lipgloss.Size(frame); width > m.width {
 			t.Fatalf("footer overflow: frame width %d, terminal width %d", width, m.width)
@@ -163,7 +164,7 @@ func TestRunningPollKeepsOriginalConversationAndThreadLabel(t *testing.T) {
 	}
 }
 
-func TestPollFooterFitsLongNamesAndKeepsThreadAndInterval(t *testing.T) {
+func TestPollRowFitsLongNamesAndKeepsThreadAndInterval(t *testing.T) {
 	for _, width := range []int{40, 70, 79, 80, 100, 140} {
 		for _, thread := range []bool{false, true} {
 			for _, polling := range []bool{false, true} {
@@ -175,9 +176,9 @@ func TestPollFooterFitsLongNamesAndKeepsThreadAndInterval(t *testing.T) {
 					if thread {
 						m.thread = &view{conversation: m.main.conversation, thread: "1.000001"}
 					}
-					footer := m.footer(time.Now())
-					if ansi.StringWidth(footer) != width || !strings.HasSuffix(footer, "slkt 0.20.1") {
-						t.Fatalf("footer overflowed or displaced the version: %q", footer)
+					poll := " " + m.pollIndicator(time.Now())
+					if ansi.StringWidth(poll) > width || strings.Contains(poll, "slakt") {
+						t.Fatalf("poll row overflowed or still contains app branding: %q", poll)
 					}
 					if indicator := m.pollIndicator(time.Now()); strings.Contains(indicator, "+ thread") != thread || polling && !strings.Contains(indicator, "polling…") || !polling && !strings.Contains(indicator, "15s") {
 						t.Fatalf("shortened footer lost poll scope, state, or interval: %q", indicator)
@@ -189,27 +190,50 @@ func TestPollFooterFitsLongNamesAndKeepsThreadAndInterval(t *testing.T) {
 }
 
 func TestVersionFooter(t *testing.T) {
-	for _, version := range []string{"0.16.0", "0.16.0-dev+abcdef012345.dirty.src.abcdef012345"} {
+	for _, version := range []string{"", "0.16.0", "0.16.0-dev+abcdef012345.dirty.src.abcdef012345"} {
 		for _, width := range []int{40, 70, 140} {
-			for _, polling := range []bool{false, true} {
-				t.Run(fmt.Sprintf("%s/width=%d/polling=%t", version, width, polling), func(t *testing.T) {
+			for _, mode := range []string{"", "compose", "jump", "search", "react", "help"} {
+				t.Run(fmt.Sprintf("%s/width=%d/mode=%s", version, width, mode), func(t *testing.T) {
 					m := loadedModel(t)
 					m.options.Version = version
-					m.width, m.polling = width, polling
-					m.nextPoll = time.Now().Add(time.Hour)
+					updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+					m = updated.(model)
+					m.mode = mode
+					if mode == "help" {
+						m.mode, m.help = "", true
+					}
 					frame := m.View()
 					lines := strings.Split(ansi.Strip(frame), "\n")
-					footer := lines[len(lines)-1]
-					if !strings.HasPrefix(footer, " "+m.pollIndicator(time.Now())) || !strings.Contains(footer, "slkt 0.16.0") {
-						t.Fatalf("poll indicator or version missing: %q", footer)
+					footer := m.footer()
+					if !strings.HasPrefix(footer, m.commandHints()) || !strings.Contains(footer, "slakt") {
+						t.Fatalf("hints or app name missing: %q", footer)
 					}
 					if ansi.StringWidth(footer) != width || strings.HasSuffix(footer, " ") {
 						t.Fatalf("version is not aligned to the right edge at width %d: %q", width, footer)
 					}
-					if !strings.Contains(version, "-dev") || width == 140 {
-						if !strings.HasSuffix(footer, "slkt "+version) || !strings.Contains(footer, m.identity.User) {
-							t.Fatalf("full version or identity missing: %q", footer)
+					brand := "slakt"
+					if version != "" {
+						brand += " " + version
+						if !strings.Contains(footer, "slakt 0.16.0") {
+							t.Fatalf("base version missing: %q", footer)
 						}
+					}
+					if !strings.Contains(version, "-dev") || width == 140 {
+						if !strings.HasSuffix(footer, brand) {
+							t.Fatalf("full version missing: %q", footer)
+						}
+					}
+					found := false
+					for i, line := range lines {
+						if line == footer {
+							found = true
+							if i == 0 || lines[i-1] != strings.Repeat("─", width) {
+								t.Fatalf("branding is not on the footer's first row: %q", footer)
+							}
+						}
+					}
+					if !found || strings.Contains(lines[0], "slakt") || strings.Contains(lines[len(lines)-2], "slakt") {
+						t.Fatal("app branding was missing from the footer's first row or duplicated elsewhere")
 					}
 					if frameWidth, _ := lipgloss.Size(frame); frameWidth > width {
 						t.Fatalf("frame width %d exceeds terminal width %d", frameWidth, width)
@@ -220,13 +244,15 @@ func TestVersionFooter(t *testing.T) {
 	}
 }
 
-func TestVersionFooterFitsLongUnicodeIdentity(t *testing.T) {
+func TestPollRowDoesNotReserveSpaceForAccountOrVersion(t *testing.T) {
 	m := loadedModel(t)
-	m.options.Version = "0.16.0"
 	m.width, m.polling = 40, true
+	m.identity.User = ""
+	now := time.Now()
+	want := m.pollIndicator(now)
 	m.identity.User = strings.Repeat("同僚", 20)
-	footer := m.footer(time.Now())
-	if ansi.StringWidth(footer) != m.width || !strings.HasSuffix(footer, "slkt 0.16.0") || !strings.HasPrefix(footer, " "+m.pollIndicator(time.Now())) {
-		t.Fatalf("long identity displaced the poll indicator or version: %q", footer)
+	m.options.Version = "0.16.0-dev+abcdef012345.dirty.src.abcdef012345"
+	if poll := m.pollIndicator(now); poll != want {
+		t.Fatalf("account or version changed the polling row: %q; want %q", poll, want)
 	}
 }

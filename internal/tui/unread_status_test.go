@@ -15,7 +15,7 @@ import (
 )
 
 func unreadStatusText(m model, now time.Time, width int) string {
-	return strings.Join(strings.Fields(m.unreadIndicator(now, width)), " ")
+	return m.unreadIndicator(now, width)
 }
 
 func TestUnreadCountdownFollowsRequestCompletion(t *testing.T) {
@@ -164,13 +164,10 @@ func TestUnreadFooterFitsAndPreservesErrors(t *testing.T) {
 						t.Fatalf("unread status overflowed the terminal: %dx%d", w, h)
 					}
 					lines := strings.Split(ansi.Strip(frame), "\n")
-					footer := lines[len(lines)-1]
-					unread := footer
-					if width < unreadInlineWidth {
-						unread = lines[len(lines)-2]
-						if strings.Contains(footer, "unread:") {
-							t.Fatalf("narrow unread status was not kept on its compact line: %q", unread)
-						}
+					footer := lines[len(lines)-2]
+					unread := lines[len(lines)-1]
+					if strings.Contains(footer, "unread:") || !strings.HasPrefix(unread, " unread: next ") || ansi.StringWidth(unread) > width {
+						t.Fatalf("unread status did not use the row below polling: %q\n%q", footer, unread)
 					}
 					if !strings.Contains(unread, "unread: next ") || !strings.Contains(unread, " · checking ") || checking && !strings.Contains(unread, "checking #") || !checking && !strings.Contains(unread, "in 2s") {
 						t.Fatalf("unread activity or countdown missing: %q", unread)
@@ -178,8 +175,8 @@ func TestUnreadFooterFitsAndPreservesErrors(t *testing.T) {
 					if !strings.Contains(frame, m.unreadError) || !strings.HasPrefix(footer, " "+m.pollIndicator(time.Now())) {
 						t.Fatal("unread activity displaced the existing error or poll indicator")
 					}
-					if version != "" && (!strings.Contains(footer, "slkt 0.17.0") || ansi.StringWidth(footer) != width) {
-						t.Fatalf("unread activity displaced the version: %q", footer)
+					if version != "" && (!strings.Contains(frame, "slakt 0.17.0") || ansi.StringWidth(m.footer()) != width) {
+						t.Fatalf("unread activity displaced the version: %q", m.footer())
 					}
 				})
 			}
@@ -204,7 +201,7 @@ func TestUnreadCountdownRoundsUpUntilDeadline(t *testing.T) {
 	}
 }
 
-func TestUnreadLabelsStayInPlaceAcrossRequests(t *testing.T) {
+func TestUnreadStatusKeepsCheckingBesideNext(t *testing.T) {
 	for _, width := range []int{40, 79, 80, 100, 140} {
 		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
 			m := loadedModel(t)
@@ -215,7 +212,6 @@ func TestUnreadLabelsStayInPlaceAcrossRequests(t *testing.T) {
 				{ID: "D1", Kind: "dm", Name: strings.Repeat("同僚👩🏽‍💻", 20)},
 			}
 			now := time.Now()
-			columns := map[string]int{}
 			for _, polling := range []bool{false, true} {
 				m.polling = polling
 				for _, checking := range []bool{false, true, false} {
@@ -225,20 +221,17 @@ func TestUnreadLabelsStayInPlaceAcrossRequests(t *testing.T) {
 						m.unreadCurrent, m.unreadIndex = m.conversations[1], 2
 						m.nextUnreadCheck = time.Time{}
 					}
-					text := m.footer(now)
-					if width < unreadInlineWidth {
-						text = m.unreadIndicator(now, width-1)
+					text := strings.Split(ansi.Strip(m.View()), "\n")
+					unread := text[len(text)-1]
+					next, current, ok := strings.Cut(unread, " · checking ")
+					if !ok || !strings.HasPrefix(next, " unread: next ") || current == "" {
+						t.Fatalf("unread labels missing: %q", unread)
 					}
-					for _, label := range []string{"unread: next ", " · checking "} {
-						index := strings.Index(text, label)
-						if index < 0 {
-							t.Fatalf("label %q missing: %q", label, text)
-						}
-						column := ansi.StringWidth(text[:index])
-						if before, exists := columns[label]; exists && column != before {
-							t.Fatalf("label %q moved from column %d to %d: %q", label, before, column, text)
-						}
-						columns[label] = column
+					if strings.HasSuffix(next, " ") || strings.TrimSpace(current) != current || ansi.StringWidth(unread) > width {
+						t.Fatalf("unread status has extra padding or overflows: %q", unread)
+					}
+					if !checking && unread != " unread: next #one in 3s · checking —" {
+						t.Fatalf("short names did not stay together: %q", unread)
 					}
 				}
 			}
