@@ -163,7 +163,10 @@ func newestTimestamp(messages []core.Message) string {
 
 func (m *model) observeLatest(channel, latest string) {
 	selected := m.sidebarSelectedID()
-	m.latest[channel] = max(m.latest[channel], latest)
+	if latest > m.latest[channel] {
+		m.latest[channel] = latest
+		m.readDirty = true
+	}
 	m.selectSidebar(selected)
 }
 
@@ -206,8 +209,10 @@ func (m *model) persistLocal() {
 		m.hiddenDirty = nil
 	}
 	if m.readDirty {
-		if err := m.options.Store.SaveReadState(ctx, m.identity.TeamID, m.identity.UserID, m.readState); err != nil {
-			m.storageError = "Cannot save read positions: " + err.Error()
+		state := m.readState
+		state.Latest = m.latest
+		if err := m.options.Store.SaveReadState(ctx, m.identity.TeamID, m.identity.UserID, state); err != nil {
+			m.storageError = "Cannot save unread state: " + err.Error()
 			return
 		}
 		m.readDirty = false

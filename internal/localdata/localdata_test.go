@@ -138,7 +138,10 @@ func TestReadPositionsSurviveRestartAndSeparateAccounts(t *testing.T) {
 	first.LastRead["C1"] = "2000000000.000002"
 	second.LastRead["C1"] = "2000000000.000001"
 	second.LastRead["C2"] = "2000000000.000003"
-	for _, state := range []ReadState{first, second} {
+	first.Latest["C1"] = "2000000000.000004"
+	second.Latest["C1"] = "2000000000.000003"
+	second.Latest["C2"] = "2000000000.000003"
+	for _, state := range []ReadState{first, second, {StartedAt: first.StartedAt}} {
 		if err := store.SaveReadState(ctx, "T1", "U1", state); err != nil {
 			t.Fatal(err)
 		}
@@ -148,10 +151,13 @@ func TestReadPositionsSurviveRestartAndSeparateAccounts(t *testing.T) {
 	if err != nil || got.StartedAt != first.StartedAt || got.LastRead["C1"] != first.LastRead["C1"] || got.LastRead["C2"] != second.LastRead["C2"] {
 		t.Fatalf("read positions lost: %+v, %v", got, err)
 	}
+	if got.Latest["C1"] != first.Latest["C1"] || got.Latest["C2"] != second.Latest["C2"] {
+		t.Fatalf("latest observations lost or moved backwards: %+v", got)
+	}
 	for _, account := range [][2]string{{"T2", "U1"}, {"T1", "U2"}} {
 		other, err := restarted.LoadReadState(ctx, account[0], account[1])
-		if err != nil || len(other.LastRead) != 0 {
-			t.Fatalf("read positions leaked between accounts: %+v, %v", other, err)
+		if err != nil || len(other.LastRead) != 0 || len(other.Latest) != 0 {
+			t.Fatalf("unread state leaked between accounts: %+v, %v", other, err)
 		}
 	}
 	if _, err := os.Stat(store.ConfigPath); !os.IsNotExist(err) {
@@ -160,6 +166,30 @@ func TestReadPositionsSurviveRestartAndSeparateAccounts(t *testing.T) {
 	info, _ := os.Stat(store.StatePath)
 	if info.Mode().Perm() != 0600 {
 		t.Fatalf("read-state permissions = %o", info.Mode().Perm())
+	}
+}
+
+func TestLegacyReadStateLoadsWithoutLatestObservations(t *testing.T) {
+	store := testStore(t)
+	if err := os.MkdirAll(filepath.Dir(store.StatePath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := `{"accounts":{"T1/U1":{"started_at":"1000000000.000000","last_read":{"C1":"2000000000.000001"}}}}`
+	if err := os.WriteFile(store.StatePath, []byte(legacy), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	state, err := store.LoadReadState(ctx, "T1", "U1")
+	if err != nil || state.StartedAt != "1000000000.000000" || state.Position("C1") != "2000000000.000001" || state.Latest == nil || len(state.Latest) != 0 {
+		t.Fatalf("legacy read positions were lost or observations invented: %+v, %v", state, err)
+	}
+	state.Latest["C1"] = "2000000000.000002"
+	if err := store.SaveReadState(ctx, "T1", "U1", state); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.LoadReadState(ctx, "T1", "U1")
+	if err != nil || !reflect.DeepEqual(got, state) {
+		t.Fatalf("migrated unread state did not survive restart: %+v, %v", got, err)
 	}
 }
 
@@ -208,7 +238,8 @@ func TestConcurrentReadPositionSavesMerge(t *testing.T) {
 	for i := range 8 {
 		wg.Go(func() {
 			otherStore := &Store{StatePath: store.StatePath}
-			errs <- otherStore.SaveReadState(ctx, "T1", "U1", ReadState{StartedAt: state.StartedAt, LastRead: map[string]string{string(rune('A' + i)): "2000000000.000001"}})
+			channel := string(rune('A' + i))
+			errs <- otherStore.SaveReadState(ctx, "T1", "U1", ReadState{StartedAt: state.StartedAt, LastRead: map[string]string{channel: "2000000000.000001"}, Latest: map[string]string{channel: "2000000000.000002"}})
 		})
 	}
 	wg.Wait()
@@ -219,8 +250,8 @@ func TestConcurrentReadPositionSavesMerge(t *testing.T) {
 		}
 	}
 	got, err := store.LoadReadState(ctx, "T1", "U1")
-	if err != nil || len(got.LastRead) != 8 {
-		t.Fatalf("concurrent saves lost positions: %+v, %v", got, err)
+	if err != nil || len(got.LastRead) != 8 || len(got.Latest) != 8 {
+		t.Fatalf("concurrent saves lost unread state: %+v, %v", got, err)
 	}
 }
 

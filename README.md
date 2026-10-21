@@ -232,18 +232,21 @@ Thread-only replies and search results have no local unread boundary.
 Unread tracking belongs to slkt and does not read or change Slack's read markers.
 Existing history starts read when tracking is first enabled for an account;
 messages arriving after that baseline, including while slkt is closed, can be
-flagged unread on the next background check. Tracking covers conversation
-history, including thread replies broadcast to the conversation. Replies only
-inside a thread, edits, and reactions do not create sidebar unread indicators.
+flagged unread on the next background check. Known unread indicators are saved
+and restored on startup without waiting for those checks. When upgrading from
+a version that only saved read positions, the first scan builds this saved state.
+Tracking covers conversation history, including thread replies broadcast to the
+conversation. Replies only inside a thread, edits, and reactions do not create
+sidebar unread indicators.
 
 ## Local configuration and state
 
-UI configuration and read positions are stored separately:
+UI configuration and unread state are stored separately:
 
 | Data | Default Linux path | Environment override |
 | --- | --- | --- |
 | UI settings | `~/.config/slakt/config.json` | `$XDG_CONFIG_HOME/slakt/config.json` |
-| Read positions | `~/.local/state/slakt/read-state.json` | `$XDG_STATE_HOME/slakt/read-state.json` |
+| Read positions and latest known message timestamps | `~/.local/state/slakt/read-state.json` | `$XDG_STATE_HOME/slakt/read-state.json` |
 
 The configuration uses `"sidebar_mode": "visible"`, `"unread-first"`,
 `"unread-only"`, `"hidden"`, or `"all"`; changing the mode saves it immediately
@@ -362,8 +365,9 @@ expansion. Unsaved drafts do not survive process exit or a crash.
   requesting at most one history item per check. Checks are at least three seconds
   apart (slower if configured polling permits), starting at most 20 checks
   per minute, with the usual read retry/backoff behavior. A full scan takes longer
-  in large workspaces; unread modes fill in as results arrive. Failed checks
-  retain known unread state and retry later.
+  in large workspaces; saved unread indicators appear immediately, and checks
+  discover messages received while closed. Failed checks retain known unread
+  state and retry later.
 - Reads honor Slack's `Retry-After`, retry transient failures up to three times,
   and support cancellation. Refresh resumes automatically after disconnection.
   Gap recovery walks pages back to the previously newest message. Selection and

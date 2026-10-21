@@ -622,6 +622,11 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if next.readingMain() {
 		next.markRead(next.main.conversation.ID, next.main.messages)
 	}
+	// Latest-message observations also need saving while another pane is
+	// focused and the main conversation cannot be marked read.
+	if next.readDirty {
+		next.persistLocal()
+	}
 	// Focus and the local date can change while panes are cached. Preserve
 	// their scroll anchors when refreshing numbering or the Today separator.
 	next.refreshViews(time.Now())
@@ -665,6 +670,10 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.hidden = msg.hidden
 		if msg.readState.StartedAt != "" {
 			m.readState = msg.readState
+			m.latest = msg.readState.Latest
+			if m.latest == nil {
+				m.latest = map[string]string{}
+			}
 		}
 		for _, u := range m.users {
 			m.names[u.ID] = u.PreferredName()

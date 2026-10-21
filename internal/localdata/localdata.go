@@ -1,4 +1,4 @@
-// Package localdata stores UI configuration and local read positions separately.
+// Package localdata stores UI configuration and local unread state separately.
 package localdata
 
 import (
@@ -77,10 +77,11 @@ type Config struct {
 type ReadState struct {
 	StartedAt string            `json:"started_at"`
 	LastRead  map[string]string `json:"last_read"`
+	Latest    map[string]string `json:"latest,omitempty"`
 }
 
 func NewReadState(now time.Time) ReadState {
-	return ReadState{StartedAt: fmt.Sprintf("%d.%06d", now.Unix(), now.Nanosecond()/1000), LastRead: map[string]string{}}
+	return ReadState{StartedAt: fmt.Sprintf("%d.%06d", now.Unix(), now.Nanosecond()/1000), LastRead: map[string]string{}, Latest: map[string]string{}}
 }
 
 func (s ReadState) Position(channel string) string {
@@ -310,6 +311,9 @@ func (s *Store) LoadReadState(ctx context.Context, team, user string) (ReadState
 		if state.LastRead == nil {
 			state.LastRead = map[string]string{}
 		}
+		if state.Latest == nil {
+			state.Latest = map[string]string{}
+		}
 		return nil
 	})
 	return state, err
@@ -331,6 +335,12 @@ func (s *Store) SaveReadState(ctx context.Context, team, user string, state Read
 		}
 		for channel, ts := range state.LastRead {
 			stored.LastRead[channel] = max(stored.LastRead[channel], ts)
+		}
+		if stored.Latest == nil {
+			stored.Latest = map[string]string{}
+		}
+		for channel, ts := range state.Latest {
+			stored.Latest[channel] = max(stored.Latest[channel], ts)
 		}
 		data.Accounts[key] = stored
 		return writeJSON(s.StatePath, data)
