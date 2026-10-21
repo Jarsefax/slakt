@@ -125,6 +125,10 @@ def main():
         assert "Thread" in send(b"\r"), "thread did not open"
         composing = send(b"i")
         assert "COMPOSE" in composing and "To #general / thread" in composing, "explicit compose mode or thread destination missing"
+        assert "F1 help" in composing, "help shortcut is missing while composing"
+        assert "Help · Compose" in send(b"\x1bOP"), "F1 did not open compose help"
+        send(b"\t")  # The modal captures commands instead of changing focus.
+        send(b"\x1bOP")  # F1 restores the composer.
         send(b"Offline PTY *bold* _italic_ ~strike~ `*literal*` :thumbsup: :female-technologist::skin-tone-4:")
         sent = send(b"\x13")
         assert "Message sent" in sent, "demo thread send failed"
@@ -167,11 +171,12 @@ def main():
         fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 70, 0, 0))
         process.send_signal(signal.SIGWINCH)
         read()
-        assert "Keyboard guide" in send(b"?"), "help missing after resize"
+        assert "Help · Conversation" in send(b"?"), "contextual help missing after resize"
         send(b"j")
         fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 15, 40, 0, 0))
         process.send_signal(signal.SIGWINCH)
-        narrow = read()
+        read()
+        narrow = send(b"\x1b")  # Close the overlay to inspect the small footer.
         assert "unread: next " in narrow and " · checking " in narrow, "compact unread slots missing at the minimum terminal size"
         assert f"slkt {version}" in narrow, "compact unread status displaced the version"
         send(b"q")

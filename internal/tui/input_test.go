@@ -56,8 +56,8 @@ func TestQuitWorksOutsideTextEntry(t *testing.T) {
 	}
 }
 
-func TestModeKeyFollowsPlainQuitAvailabilityWithoutChangingFocus(t *testing.T) {
-	for _, state := range []string{"channel", "thread", "sidebar", "help", "loading", "sending", "search results", "undersized input"} {
+func TestModeKeyOutsideTextEntryAndHelpPreservesFocus(t *testing.T) {
+	for _, state := range []string{"channel", "thread", "sidebar", "loading", "sending", "search results", "undersized input"} {
 		t.Run(state, func(t *testing.T) {
 			m := loadedModel(t)
 			switch state {
@@ -65,8 +65,6 @@ func TestModeKeyFollowsPlainQuitAvailabilityWithoutChangingFocus(t *testing.T) {
 				m, _ = key(m, "enter")
 			case "sidebar":
 				m, _ = key(m, "tab")
-			case "help":
-				m, _ = key(m, "?")
 			case "loading":
 				m.main.loading = true
 			case "sending":

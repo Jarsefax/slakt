@@ -328,7 +328,7 @@ The TUI labels refresh when the local day changes.
 | --- | --- |
 | `Ctrl+k` | Jump to a conversation or person; arrows choose a result |
 | `Tab` | Focus/unfocus the conversation sidebar |
-| `m` | Cycle Visible / Unread first / Unread only / Hidden / All outside text entry, from any pane |
+| `m` | Cycle Visible / Unread first / Unread only / Hidden / All outside text entry and help |
 | `h` | Hide/unhide the highlighted sidebar conversation |
 | `j/k`, arrows | Select a message; preview conversations while the sidebar has focus |
 | `PgUp/PgDn`, `Ctrl+u/d` | Scroll long messages |
@@ -344,7 +344,8 @@ The TUI labels refresh when the local day changes.
 | `e` | Add a reaction to the selected message by emoji name |
 | `o` | Open selected message in desktop Slack (default) or the configured browser target |
 | `R` | Reload current conversation |
-| `?` | Keybinding guide |
+| `?` | Open contextual help while browsing; close help |
+| `F1` | Open/close contextual help, including while typing or sending |
 | `q` | Quit outside text entry, including help and pending operations |
 | `Ctrl+c` | Quit in any TUI mode |
 
@@ -356,6 +357,16 @@ Successful sends return to browsing; failed sends keep the draft open for retry.
 While an input is active, `q` is ordinary text and `Ctrl+c` still quits. To leave
 text entry and quit, press `Esc`, then `q`; the terminal's combined `Alt+q`
 encoding for this sequence is accepted too. Pasted text never activates commands.
+
+The command hints show **? help · q quit** while browsing and **F1 help · Ctrl+c
+quit** while typing. Composer instructions stay beside the draft. Help opens in
+a centered modal over the dimmed workspace, with actions for the current focus
+first, followed by common navigation and reference notes. `Esc`, `F1`, or `?`
+closes it and preserves your input cursor, draft, selection, and focus. Use
+arrows or `j/k` to scroll, `PgUp/PgDn` or `Ctrl+u/d` for pages, and `g/G` or
+`Home/End` for the top/bottom. Other commands are captured by the modal; `q`
+and `Ctrl+c` still quit. Background polling and pending sends can finish while
+help is open. In text entry, `?` remains ordinary text; use `F1` to open help.
 
 Threads appear alongside the timeline on wide terminals and replace it on narrow
 ones. Messages use Vim-style hybrid numbering: the selected message shows its
@@ -369,7 +380,7 @@ loaded or cached messages are evicted. Numeric keyboard commands are deferred.
 
 Messages with replies show a separate **↳ Thread · N replies** row; replies
 shown in the channel or search show **↳ In thread** when no count is available.
-The footer distinguishes **Enter: open thread** from **Enter: start thread**.
+Contextual help distinguishes **Enter: open thread** from **Enter: start thread**.
 Confirmed replies update the visible parent indicator immediately.
 
 The minimum size is 40×15. Destinations and thread context remain visible

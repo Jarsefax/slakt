@@ -108,7 +108,7 @@ func TestHideInAllKeepsRowAndRejectsTextInput(t *testing.T) {
 	m.selectSidebar(m.main.conversation.ID)
 	id := m.sidebarSelectedID()
 	m, _ = key(m, "h")
-	if !m.hidden[id] || m.sidebarSelectedID() != id || !strings.Contains(ansi.Strip(m.View()), "h: unhide") {
+	if !m.hidden[id] || m.sidebarSelectedID() != id || !strings.Contains(helpText(m), "Unhide the highlighted conversation") {
 		t.Fatal("All should retain and label the hidden row")
 	}
 	for _, msg := range []tea.KeyMsg{

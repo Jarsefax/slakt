@@ -465,6 +465,12 @@ func (m *model) dimensions() (int, int, int) {
 	if m.width < unreadInlineWidth {
 		height = max(2, m.height-13)
 	}
+	// Leave room for the composer instructions and the always-visible help hint.
+	if m.mode == "compose" && m.height >= 20 {
+		height = max(1, height-2)
+	} else if m.mode == "jump" {
+		height = max(1, height-1)
+	}
 	return side, content, height
 }
 
@@ -685,6 +691,10 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.composer.SetHeight(3)
+		if m.height < 20 {
+			m.composer.SetHeight(1)
+		}
 		_, width, _ := m.dimensions()
 		m.composer.SetWidth(max(10, width-2))
 		m.input.Width = max(10, width-5)
@@ -992,6 +1002,14 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.isQuitKey(key) {
 		return m, tea.Quit
 	}
+	if m.help {
+		return m.handleHelpKey(key)
+	}
+	if !key.Paste && (key.String() == "f1" || m.isCommandKey(key, "?")) && m.width >= 40 && m.height >= 15 {
+		m.help = true
+		m.helpOffset = 0
+		return m, nil
+	}
 	if m.isCommandKey(key, "m") {
 		selected := m.sidebarSelectedID()
 		m.sidebarMode = m.sidebarMode.Next()
@@ -1005,20 +1023,6 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	k := key.String()
 	if m.sending {
-		return m, nil
-	}
-	if m.help {
-		if k == "?" || k == "esc" {
-			m.help = false
-		}
-		_, width, height := m.dimensions()
-		limit := max(0, len(helpLines(width))-(height+2))
-		switch k {
-		case "j", "down", "pgdown":
-			m.helpOffset = min(limit, m.helpOffset+1)
-		case "k", "up", "pgup":
-			m.helpOffset = max(0, m.helpOffset-1)
-		}
 		return m, nil
 	}
 	if m.mode == "compose" {
@@ -1111,10 +1115,6 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	switch k {
-	case "?":
-		m.help = true
-		m.helpOffset = 0
-		return m, nil
 	case "ctrl+k":
 		return m, m.prompt("jump", "Jump to a channel or person…")
 	case "/":
@@ -1456,6 +1456,7 @@ func (m model) sidebarView(width, height int) string {
 }
 
 func pane(v view, width, height int, label string) string {
+	v.viewport.Height = height
 	if v.loading {
 		label += " · loading…"
 	}
@@ -1466,12 +1467,6 @@ func pane(v view, width, height int, label string) string {
 		}
 		return fmt.Sprintf("%d messages", len(v.messages))
 	}()))
-}
-
-func helpLines(width int) []string {
-	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Mark sidebar/open conversation read\ne         Add an emoji reaction\nh         Hide/unhide highlighted sidebar conversation\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry: i, /, Ctrl+k; e outside the sidebar.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: Visible / Unread first / Unread only / Hidden / All.\nVisible and unread modes exclude hidden conversations.\nHidden shows only hidden conversations; All includes everything.\n× Conversation: hidden in slkt. h in the sidebar toggles hiding.\nCtrl+k and search still find hidden conversations.\nSidebar arrows/j/k preview without marking read.\nr marks the highlighted sidebar or open conversation read.\nThe sidebar preview stays; Unread only keeps its row until you move away.\nIn the open conversation, r also clears its New messages divider.\nIn a thread, r marks its conversation read; close search first.\nEnter opens; Tab/Esc returns to the original view.\nIn Unread only, the open conversation stays listed unless hidden.\n\nUpdates use polling. Drafts live only in this process."
-	text += "\nStartup restores the last open conversation without marking read.\nReopen via sidebar Enter/Ctrl+k, or mark read with r."
-	return strings.Split(ansi.Wrap(text, max(20, width-2), ""), "\n")
 }
 
 func (m model) View() string {
@@ -1488,34 +1483,27 @@ func (m model) View() string {
 	}
 	header := accent.Bold(true).Render(" slakt ") + muted.Render(" / "+fit(badge, max(10, m.width-15)))
 	var body string
-	if m.help {
-		lines := helpLines(width)
-		start := min(m.helpOffset, max(0, len(lines)-(height+2)))
-		body = strings.Join(lines[start:min(len(lines), start+height+2)], "\n")
-		body = lipgloss.NewStyle().Height(height + 2).Render(body)
+	v := m.main
+	label := m.main.conversation.Label()
+	if m.searchActive && !m.sidebar {
+		v = m.search
+		label = fmt.Sprintf("Search: %s · %d matches · %d/%d", m.searchQuery, m.searchTotal, m.searchPage, max(1, m.searchPages))
+	}
+	if m.preview != nil {
+		v = *m.preview
+		label = "Preview · " + v.conversation.Label()
+	}
+	if m.thread != nil && m.width >= 125 {
+		left := (width - 3) / 2
+		right := width - left - 3
+		body = lipgloss.JoinHorizontal(lipgloss.Top, pane(v, left, height, label), accent.Render(" │ "), pane(*m.thread, right, height, "Thread · "+m.thread.conversation.Label()))
+	} else if m.thread != nil && !m.sidebar {
+		body = pane(*m.thread, width, height, "Thread · "+m.thread.conversation.Label()+" · Esc back")
 	} else {
-		v := m.main
-		label := m.main.conversation.Label()
-		if m.searchActive && !m.sidebar {
-			v = m.search
-			label = fmt.Sprintf("Search: %s · %d matches · %d/%d", m.searchQuery, m.searchTotal, m.searchPage, max(1, m.searchPages))
-		}
-		if m.preview != nil {
-			v = *m.preview
-			label = "Preview · " + v.conversation.Label()
-		}
-		if m.thread != nil && m.width >= 125 {
-			left := (width - 3) / 2
-			right := width - left - 3
-			body = lipgloss.JoinHorizontal(lipgloss.Top, pane(v, left, height, label), accent.Render(" │ "), pane(*m.thread, right, height, "Thread · "+m.thread.conversation.Label()))
-		} else if m.thread != nil && !m.sidebar {
-			body = pane(*m.thread, width, height, "Thread · "+m.thread.conversation.Label()+" · Esc back")
-		} else {
-			body = pane(v, width, height, label)
-		}
-		if side > 0 {
-			body = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(side-1, height+3), " ", body)
-		}
+		body = pane(v, width, height, label)
+	}
+	if side > 0 {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(side-1, height+3), " ", body)
 	}
 	var bottom string
 	switch m.mode {
@@ -1528,11 +1516,14 @@ func (m model) View() string {
 		if v.thread != "" {
 			context += " / thread"
 		}
-		label := " COMPOSE · To " + context + " · Ctrl+s send · Esc browse · Ctrl+c quit · Ctrl+e editor"
+		label := " COMPOSE · To " + context
 		if m.sending {
-			label = " SENDING · To " + context + " · m mode · q / Ctrl+c quit"
+			label = " SENDING · To " + context
 		}
 		bottom = accent.Render(fit(label, m.width)) + "\n" + m.composer.View()
+		if !m.sending {
+			bottom += "\n" + muted.Render(" Ctrl+s send · Enter newline · Esc save")
+		}
 	case "jump", "search", "react":
 		bottom = ansi.Truncate(accent.Render(" "+strings.ToUpper(m.mode)+" › ")+m.input.View(), m.width, "…")
 		if m.mode == "jump" {
@@ -1550,34 +1541,15 @@ func (m model) View() string {
 			bottom += "\n" + muted.Render(" Enter to confirm · Esc cancel")
 		}
 	default:
-		action := ""
-		v := m.active()
-		switch {
-		case m.sidebar:
-			hideAction := "h: hide"
-			if m.hidden[m.sidebarSelectedID()] {
-				hideAction = "h: unhide"
-			}
-			action = "↑/↓ preview  " + hideAction + "  r: read  Enter: open  Tab/Esc: back  "
-		case m.thread != nil:
-			action = "e: react  Esc: back  "
-		case len(v.messages) > 0:
-			action = "e: react  Enter: start thread  "
-			if threadIndicator(v.messages[v.selected]) != "" {
-				action = "e: react  Enter: open thread  "
-			}
-		}
-		if !m.sidebar && !m.searchActive {
-			action = "r: read  " + action
-		}
-		bottom = muted.Render(fit(" q quit  m mode  i compose  "+action+"Ctrl+k jump  / search  ? help", m.width))
-		if draft := m.drafts[draftKey(m.main.conversation.ID, "")]; draft != "" {
-			bottom += "\n" + accent.Render(fit(" Draft saved for this conversation · i to continue", m.width))
+		if draft := m.drafts[draftKey(m.active().conversation.ID, m.active().thread)]; draft != "" {
+			bottom = accent.Render(fit(" Draft saved · i to continue", m.width))
 		}
 	}
-	if m.help {
-		bottom = muted.Render(fit(" q quit · m mode · ↑/↓ scroll · ?/Esc back", m.width))
+	if bottom != "" {
+		bottom += "\n"
 	}
+	bottom += muted.Render(fit(m.commandHints(), m.width))
+
 	statusText := m.status
 	if m.previewError != "" {
 		statusText = "Preview failed: " + m.previewError
@@ -1594,5 +1566,9 @@ func (m model) View() string {
 		status += "\n" + muted.Render(" "+m.unreadIndicator(now, m.width-1))
 	}
 	status += "\n" + muted.Render(m.footer(now))
-	return header + "\n" + separator(m.width) + "\n" + body + "\n" + separator(m.width) + "\n" + bottom + "\n" + status
+	frame := header + "\n" + separator(m.width) + "\n" + body + "\n" + separator(m.width) + "\n" + bottom + "\n" + status
+	if m.help {
+		return m.helpOverlay(frame)
+	}
+	return frame
 }

@@ -70,6 +70,8 @@ func key(m model, k string) (model, tea.Cmd) {
 		msg.Alt = true
 	case "tab":
 		msg.Type = tea.KeyTab
+	case "f1":
+		msg.Type = tea.KeyF1
 	default:
 		msg.Type = tea.KeyRunes
 		msg.Runes = []rune(k)
@@ -327,8 +329,12 @@ func TestThreadIndicatorsAndContextualActions(t *testing.T) {
 			} else if !strings.Contains(frame, "\n    ▎ "+test.indicator) {
 				t.Fatalf("thread indicator missing from its own row: %s", frame)
 			}
-			if !strings.Contains(ansi.Strip(m.View()), "Enter: "+test.action) {
-				t.Fatalf("incorrect thread action: %s", m.View())
+			action := "Start a thread"
+			if test.action == "open thread" {
+				action = "Open the selected message's thread"
+			}
+			if !strings.Contains(helpText(m), action) {
+				t.Fatalf("incorrect thread action: %s", helpText(m))
 			}
 		})
 	}
@@ -365,7 +371,7 @@ func TestConfirmedReplyUpdatesVisibleParentsWithoutMutatingSnapshots(t *testing.
 			m, _ = key(m, "esc")
 			m.reveal(&m.main)
 			frame := ansi.Strip(m.View())
-			if !strings.Contains(frame, fmt.Sprintf("↳ Thread · %d", before+1)) || !strings.Contains(frame, "Enter: open thread") {
+			if !strings.Contains(frame, fmt.Sprintf("↳ Thread · %d", before+1)) || !strings.Contains(helpText(m), "Open the selected message's thread") {
 				t.Fatalf("parent still looks like it has no thread: %s", frame)
 			}
 		})
@@ -429,7 +435,7 @@ func TestResponsiveViews(t *testing.T) {
 	for _, size := range [][2]int{{45, 18}, {80, 24}, {140, 40}} {
 		mm, _ := m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		m = mm.(model)
-		if output := m.View(); !strings.Contains(output, "OFFLINE DEMO") || !strings.Contains(output, "compose") {
+		if output := m.View(); !strings.Contains(output, "OFFLINE DEMO") || !strings.Contains(output, "? help · q quit") {
 			t.Fatalf("bad frame at %v: %s", size, output)
 		}
 	}
