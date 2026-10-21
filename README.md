@@ -409,6 +409,13 @@ expansion. Unsaved drafts do not survive process exit or a crash.
   in large workspaces; saved unread indicators appear immediately, and checks
   discover messages received while closed. Failed checks retain known unread
   state and retry later.
+- Background unread checks follow the sidebar mode's hidden filter: **Visible**,
+  **Unread first**, and **Unread only** skip hidden conversations; **Hidden** checks
+  only hidden conversations; **All** checks every conversation. Read conversations
+  still get checked in **Unread only** so new messages can make them appear.
+  Scrolling the sidebar does not affect eligibility. Mode and hide/unhide changes
+  apply to the next check; a request already running may finish. The open
+  conversation and thread keep their separate refresh, even when hidden.
 - Reads honor Slack's `Retry-After`, retry transient failures up to three times,
   and support cancellation. Refresh resumes automatically after disconnection.
   Gap recovery walks pages back to the previously newest message. Selection and

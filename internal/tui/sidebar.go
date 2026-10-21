@@ -26,21 +26,26 @@ func (m model) readingMain() bool {
 		(m.thread == nil || m.width >= 125) && m.width >= 40 && m.height >= 15
 }
 
+// Share the mode's hidden filter with unread discovery. Unread-only discovery
+// must still check read conversations so new arrivals can make them appear.
+func (m model) matchesHiddenFilter(channel string) bool {
+	switch m.sidebarMode {
+	case localdata.All:
+		return true
+	case localdata.Hidden:
+		return m.hidden[channel]
+	default:
+		return !m.hidden[channel]
+	}
+}
+
 // The source directory remains complete and alphabetically grouped, including
 // for Ctrl+k. Rendering and navigation share this filtered, sorted projection.
 func (m model) sidebarConversations() []core.Conversation {
 	items := make([]core.Conversation, 0, len(m.conversations))
 	for _, c := range m.conversations {
-		switch m.sidebarMode {
-		case localdata.All:
-		case localdata.Hidden:
-			if !m.hidden[c.ID] {
-				continue
-			}
-		default:
-			if m.hidden[c.ID] {
-				continue
-			}
+		if !m.matchesHiddenFilter(c.ID) {
+			continue
 		}
 		if m.sidebarMode != localdata.UnreadOnly || m.isUnread(c.ID) || c.ID == m.main.conversation.ID || m.sidebar && c.ID == m.sidebarReadID {
 			items = append(items, c)
@@ -276,12 +281,12 @@ func (m *model) scheduleUnreadCheck() tea.Cmd {
 }
 
 // Rendering and dispatch use the same queue, including when the user changes
-// the open conversation while a background request is running.
+// the open conversation, sidebar mode, or hidden choices during a request.
 func (m model) nextUnreadConversation() (core.Conversation, int) {
 	if m.identity.TeamID != "" {
 		for offset := range m.conversations {
 			i := (m.unreadIndex + offset) % len(m.conversations)
-			if c := m.conversations[i]; c.ID != m.main.conversation.ID {
+			if c := m.conversations[i]; c.ID != m.main.conversation.ID && m.matchesHiddenFilter(c.ID) {
 				return c, i
 			}
 		}
