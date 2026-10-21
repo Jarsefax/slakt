@@ -47,6 +47,7 @@ func TestSidebarModesKeepSectionsAndNavigationInSync(t *testing.T) {
 		mode localdata.SidebarMode
 		want []string
 	}{
+		{localdata.Visible, []string{"S1", "S2", "C1", "C2", "C3", "D1", "D2", "G1", "G2"}},
 		{localdata.All, []string{"S1", "S2", "C1", "C2", "C3", "D1", "D2", "G1", "G2"}},
 		{localdata.UnreadFirst, []string{"S2", "S1", "C2", "C3", "C1", "D2", "D1", "G2", "G1"}},
 		{localdata.UnreadOnly, []string{"S2", "C2", "C3", "D2", "G2"}},
@@ -154,7 +155,7 @@ func TestModeCyclesFromEitherPaneAndPersistsSeparately(t *testing.T) {
 	root := t.TempDir()
 	store := &localdata.Store{ConfigPath: filepath.Join(root, "config", "config.json"), StatePath: filepath.Join(root, "state", "read-state.json")}
 	m.options.Store = store
-	for _, want := range []localdata.SidebarMode{localdata.UnreadFirst, localdata.UnreadOnly, localdata.All} {
+	for _, want := range []localdata.SidebarMode{localdata.UnreadFirst, localdata.UnreadOnly, localdata.Hidden, localdata.All, localdata.Visible} {
 		m, _ = key(m, "m")
 		got, err := store.LoadMode()
 		if err != nil || m.sidebarMode != want || got != want {
@@ -164,13 +165,13 @@ func TestModeCyclesFromEitherPaneAndPersistsSeparately(t *testing.T) {
 	}
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Paste: true})
 	m = updated.(model)
-	if m.sidebarMode != localdata.All {
+	if m.sidebarMode != localdata.Visible {
 		t.Fatal("pasting m changed sidebar mode")
 	}
 	m, _ = key(m, "tab")
 	m, _ = key(m, "i")
 	m, _ = key(m, "m")
-	if m.sidebarMode != localdata.All || m.composer.Value() != "m" {
+	if m.sidebarMode != localdata.Visible || m.composer.Value() != "m" {
 		t.Fatal("m in composer activated a sidebar command")
 	}
 }

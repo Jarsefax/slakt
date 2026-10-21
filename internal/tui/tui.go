@@ -87,6 +87,8 @@ type model struct {
 	polling                              bool
 	nextPoll                             time.Time
 	sidebarMode                          localdata.SidebarMode
+	hidden                               map[string]bool
+	hiddenDirty                          map[string]bool
 	messageOpenTarget                    localdata.MessageOpenTarget
 	openMessage                          func(target, team, channel, ts, thread string) error
 	readState                            localdata.ReadState
@@ -104,6 +106,7 @@ type directoryResult struct {
 	users         []core.User
 	err           error
 	readState     localdata.ReadState
+	hidden        map[string]bool
 }
 type messagesResult struct {
 	channel, thread string
@@ -173,7 +176,7 @@ func Run(ctx context.Context, service *core.Service, opts Options) error {
 	finished, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
 	if final, ok := finished.(model); ok {
 		final.clearPreview()
-		if final.configDirty || final.readDirty {
+		if final.configDirty || final.readDirty || len(final.hiddenDirty) > 0 {
 			final.persistLocal()
 			if err == nil && final.storageError != "" {
 				err = fmt.Errorf("%s", final.storageError)
@@ -194,7 +197,7 @@ func newModel(ctx context.Context, s *core.Service, opts Options) model {
 	composer.ShowLineNumbers = false
 	composer.KeyMap.InsertNewline.SetKeys("enter", "alt+enter")
 	now := time.Now()
-	return model{ctx: ctx, service: s, options: opts, input: input, composer: composer, drafts: map[string]string{}, names: map[string]string{}, sidebarMode: localdata.All, messageOpenTarget: localdata.Desktop, openMessage: platform.OpenSlackMessage, readState: localdata.NewReadState(now), latest: map[string]string{}, nextPoll: now.Add(opts.PollInterval), width: 100, height: 30, status: "Connecting…", main: view{viewport: viewport.New(60, 15)}, search: view{viewport: viewport.New(60, 15)}}
+	return model{ctx: ctx, service: s, options: opts, input: input, composer: composer, drafts: map[string]string{}, names: map[string]string{}, sidebarMode: localdata.Visible, hidden: map[string]bool{}, messageOpenTarget: localdata.Desktop, openMessage: platform.OpenSlackMessage, readState: localdata.NewReadState(now), latest: map[string]string{}, nextPoll: now.Add(opts.PollInterval), width: 100, height: 30, status: "Connecting…", main: view{viewport: viewport.New(60, 15)}, search: view{viewport: viewport.New(60, 15)}}
 }
 
 func (m model) Init() tea.Cmd {
@@ -232,10 +235,14 @@ func (m model) directoryCmd() tea.Cmd {
 		}
 		conversations, users, err := m.service.Directory(ctx, true)
 		state := m.readState
+		hidden := m.hidden
 		if err == nil && m.options.Store != nil {
 			state, err = m.options.Store.LoadReadState(ctx, id.TeamID, id.UserID)
+			if err == nil {
+				hidden, err = m.options.Store.LoadHiddenConversations(id.TeamID, id.UserID)
+			}
 		}
-		return directoryResult{identity: id, conversations: conversations, users: users, err: err, readState: state}
+		return directoryResult{identity: id, conversations: conversations, users: users, err: err, readState: state, hidden: hidden}
 	}
 }
 
@@ -623,6 +630,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.identity, m.conversations, m.users = msg.identity, msg.conversations, msg.users
+		m.hidden = msg.hidden
 		if msg.readState.StartedAt != "" {
 			m.readState = msg.readState
 		}
@@ -632,10 +640,14 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.options.Initial != nil {
 			return m, m.switchTo(*m.options.Initial)
 		}
-		if len(m.conversations) > 0 {
-			return m, m.switchTo(m.conversations[0])
+		initial := m
+		if initial.sidebarMode == localdata.UnreadOnly {
+			initial.sidebarMode = localdata.Visible
 		}
-		m.status = "No conversations. Ctrl+k to open a DM."
+		if items := initial.sidebarConversations(); len(items) > 0 {
+			return m, m.switchTo(items[0])
+		}
+		m.status = "No conversations in this mode. m to change mode · Ctrl+k to jump."
 	case messagesResult:
 		v := &m.main
 		if msg.thread != "" {
@@ -1048,6 +1060,10 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.isCommandKey(key, "r") {
 				m.markSidebarRead()
 			}
+		case "h":
+			if m.isCommandKey(key, "h") {
+				m.toggleSidebarHidden()
+			}
 		case "enter":
 			if len(items) > 0 {
 				return m, m.switchTo(items[min(m.sideIndex, len(items)-1)])
@@ -1291,6 +1307,9 @@ func (m model) sidebarView(width, height int) string {
 		if m.isUnread(c.ID) {
 			prefix += "● "
 		}
+		if m.hidden[c.ID] {
+			prefix += "× "
+		}
 		label := fit(prefix+c.Label(), width-2)
 		if m.sidebar && i == m.sideIndex {
 			label = selectedStyle.Width(width).Render(label)
@@ -1307,6 +1326,10 @@ func (m model) sidebarView(width, height int) string {
 		label := "No conversations"
 		if m.sidebarMode == localdata.UnreadOnly {
 			label = "No unread conversations"
+		} else if m.sidebarMode == localdata.Hidden {
+			label = "No hidden conversations"
+		} else if m.sidebarMode != localdata.All {
+			label = "No visible conversations"
 		}
 		lines = append(lines, muted.Render(fit(label, width)))
 	}
@@ -1345,7 +1368,7 @@ func pane(v view, width, height int, label string) string {
 }
 
 func helpLines(width int) []string {
-	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Mark sidebar conversation read / add a reaction\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry: i, /, Ctrl+k; r outside the sidebar.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: All / Unread first / Unread only.\nSidebar arrows/j/k preview without marking read.\nr marks the highlighted conversation read.\nIts preview stays; Unread only keeps its row until you move away.\nEnter opens; Tab/Esc returns to the original view.\nThe open conversation stays listed until you leave.\n\nUpdates use polling. Drafts live only in this process."
+	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Mark sidebar conversation read / add a reaction\nh         Hide/unhide highlighted sidebar conversation\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry: i, /, Ctrl+k; r outside the sidebar.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: Visible / Unread first / Unread only / Hidden / All.\nVisible and unread modes exclude hidden conversations.\nHidden shows only hidden conversations; All includes everything.\n× Conversation: hidden in slkt. h in the sidebar toggles hiding.\nCtrl+k and search still find hidden conversations.\nSidebar arrows/j/k preview without marking read.\nr marks the highlighted conversation read.\nIts preview stays; Unread only keeps its row until you move away.\nEnter opens; Tab/Esc returns to the original view.\nIn Unread only, the open conversation stays listed unless hidden.\n\nUpdates use polling. Drafts live only in this process."
 	return strings.Split(ansi.Wrap(text, max(20, width-2), ""), "\n")
 }
 
@@ -1429,7 +1452,11 @@ func (m model) View() string {
 		v := m.active()
 		switch {
 		case m.sidebar:
-			action = "↑/↓ preview  r: mark read  Enter: open  Tab/Esc: back  "
+			hideAction := "h: hide"
+			if m.hidden[m.sidebarSelectedID()] {
+				hideAction = "h: unhide"
+			}
+			action = "↑/↓ preview  " + hideAction + "  r: read  Enter: open  Tab/Esc: back  "
 		case m.thread != nil:
 			action = "Esc: back  "
 		case len(v.messages) > 0:

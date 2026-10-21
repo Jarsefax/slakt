@@ -140,6 +140,16 @@ def main():
         send(b"i")
         send(b"Offline PTY DM smoke test.")
         assert "Message sent" in send(b"\x13"), "demo DM send failed"
+        send(b"\t")
+        assert "Hidden @alice" in send(b"h"), "sidebar did not hide the selected DM"
+        send(b"m")  # Visible -> Unread first
+        send(b"m")  # Unread first -> Unread only
+        hidden = send(b"m")  # Unread only -> Hidden
+        assert "Hidden · m" in hidden and "× @alice" in hidden, "Hidden mode lost the hidden DM"
+        all_conversations = send(b"m")  # Hidden -> All
+        assert "All · m" in all_conversations, "All mode missing"
+        assert "Unhid @alice" in send(b"h"), "All mode did not unhide the selected DM"
+        assert "Visible · m" in send(b"m"), "mode cycle did not return to Visible"
         send(b"\x1b")
         fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 70, 0, 0))
         process.send_signal(signal.SIGWINCH)
@@ -148,7 +158,7 @@ def main():
         send(b"j")
         send(b"q")
         assert process.wait(timeout=3) == 0, "TUI exited unsuccessfully"
-        print("PASS: grouped sidebar/navigation, hybrid message numbers, thread indicators, channel jump, formatted thread send with emoji, search/result thread, DM send, resize, help, quit (offline PTY)")
+        print("PASS: grouped sidebar/navigation, message numbers, thread indicators, channel jump, formatted thread send with emoji, search/result thread, DM send, hide/unhide and five sidebar modes, resize, help, quit (offline PTY)")
         check_quit_paths(binary, environment)
     finally:
         if process.poll() is None:

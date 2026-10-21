@@ -158,7 +158,7 @@ func TestSidebarPreviewReloadsWhenUnreadFilterChanges(t *testing.T) {
 	m, cmd := key(m, "j")
 	full := cmd().(previewResult)
 	preview := m.preview
-	m, cmd = key(m, "m") // All -> Unread first uses the same history.
+	m, cmd = key(m, "m") // Visible -> Unread first uses the same history.
 	if cmd != nil || m.preview != preview {
 		t.Fatal("Unread first unnecessarily restarted the preview")
 	}
@@ -180,7 +180,12 @@ func TestSidebarPreviewReloadsWhenUnreadFilterChanges(t *testing.T) {
 	if m.preview.loading || len(m.preview.messages) != 1 || m.preview.messages[0].Text != "fresh arrival" {
 		t.Fatal("unread-only preview did not exclude messages at or before the boundary")
 	}
-	m, cmd = key(m, "m") // Unread only -> All must fetch read history again.
+	m, _ = key(m, "m") // Unread only -> Hidden has no rows in this account.
+	if m.preview != nil {
+		t.Fatal("empty Hidden mode retained an unrelated preview")
+	}
+	m, _ = key(m, "m")   // Hidden -> All restores the complete directory.
+	m, cmd = key(m, "j") // Highlight CGENERAL again to fetch full history.
 	if cmd == nil {
 		t.Fatal("All did not reload the full preview history")
 	}

@@ -17,14 +17,22 @@ type SidebarMode string
 
 const (
 	All         SidebarMode = "all"
+	Visible     SidebarMode = "visible"
+	Hidden      SidebarMode = "hidden"
 	UnreadFirst SidebarMode = "unread-first"
 	UnreadOnly  SidebarMode = "unread-only"
 )
 
-func (m SidebarMode) Valid() bool { return m == All || m == UnreadFirst || m == UnreadOnly }
+func (m SidebarMode) Valid() bool {
+	return m == All || m == Visible || m == Hidden || m == UnreadFirst || m == UnreadOnly
+}
 
 func (m SidebarMode) Label() string {
 	switch m {
+	case Visible:
+		return "Visible"
+	case Hidden:
+		return "Hidden"
 	case UnreadFirst:
 		return "Unread first"
 	case UnreadOnly:
@@ -37,9 +45,13 @@ func (m SidebarMode) Label() string {
 func (m SidebarMode) Next() SidebarMode {
 	switch m {
 	case All:
+		return Visible
+	case Visible:
 		return UnreadFirst
 	case UnreadFirst:
 		return UnreadOnly
+	case UnreadOnly:
+		return Hidden
 	default:
 		return All
 	}
@@ -55,8 +67,9 @@ const (
 func (t MessageOpenTarget) Valid() bool { return t == Desktop || t == Browser }
 
 type Config struct {
-	SidebarMode       SidebarMode       `json:"sidebar_mode"`
-	MessageOpenTarget MessageOpenTarget `json:"message_open_target"`
+	SidebarMode         SidebarMode                `json:"sidebar_mode"`
+	MessageOpenTarget   MessageOpenTarget          `json:"message_open_target"`
+	HiddenConversations map[string]map[string]bool `json:"hidden_conversations,omitempty"`
 }
 
 // StartedAt establishes a baseline once per account, including conversations
@@ -110,12 +123,12 @@ func readJSON(path string, value any) error {
 }
 
 func (s *Store) LoadConfig() (Config, error) {
-	config := Config{SidebarMode: All, MessageOpenTarget: Desktop}
+	config := Config{SidebarMode: Visible, MessageOpenTarget: Desktop}
 	if err := readJSON(s.ConfigPath, &config); err != nil {
 		return config, err
 	}
 	if config.SidebarMode == "" {
-		config.SidebarMode = All
+		config.SidebarMode = Visible
 	}
 	if !config.SidebarMode.Valid() {
 		return config, fmt.Errorf("invalid sidebar_mode %q in %s", config.SidebarMode, s.ConfigPath)
@@ -129,7 +142,7 @@ func (s *Store) LoadConfig() (Config, error) {
 func (s *Store) LoadMode() (SidebarMode, error) {
 	config, err := s.LoadConfig()
 	if err != nil {
-		return All, err
+		return Visible, err
 	}
 	return config.SidebarMode, nil
 }
@@ -189,6 +202,13 @@ func (s *Store) SaveMessageOpenTarget(ctx context.Context, target MessageOpenTar
 }
 
 func (s *Store) saveSetting(ctx context.Context, key, value string) error {
+	return s.saveConfig(ctx, func(config map[string]json.RawMessage) error {
+		config[key], _ = json.Marshal(value)
+		return nil
+	})
+}
+
+func (s *Store) saveConfig(ctx context.Context, update func(map[string]json.RawMessage) error) error {
 	return locked(ctx, s.ConfigPath, func() error {
 		config := map[string]json.RawMessage{}
 		if err := readJSON(s.ConfigPath, &config); err != nil {
@@ -197,8 +217,60 @@ func (s *Store) saveSetting(ctx context.Context, key, value string) error {
 		if config == nil {
 			return fmt.Errorf("invalid configuration in %s", s.ConfigPath)
 		}
-		config[key], _ = json.Marshal(value)
+		if err := update(config); err != nil {
+			return err
+		}
 		return writeJSON(s.ConfigPath, config)
+	})
+}
+
+func (s *Store) LoadHiddenConversations(team, user string) (map[string]bool, error) {
+	config, err := s.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	hidden := config.HiddenConversations[team+"/"+user]
+	if hidden == nil {
+		hidden = map[string]bool{}
+	}
+	return hidden, nil
+}
+
+// Save only changed IDs so stale sessions cannot replace another session's
+// choices for unrelated conversations. Explicitly unhiding removes the ID.
+func (s *Store) SaveHiddenConversations(ctx context.Context, team, user string, changes map[string]bool) error {
+	if team == "" || user == "" {
+		return errors.New("missing account for hidden conversations")
+	}
+	return s.saveConfig(ctx, func(config map[string]json.RawMessage) error {
+		accounts := map[string]map[string]bool{}
+		if raw, ok := config["hidden_conversations"]; ok {
+			if err := json.Unmarshal(raw, &accounts); err != nil {
+				return fmt.Errorf("read hidden conversations in %s: %w", s.ConfigPath, err)
+			}
+		}
+		if accounts == nil {
+			accounts = map[string]map[string]bool{}
+		}
+		key := team + "/" + user
+		hidden := accounts[key]
+		if hidden == nil {
+			hidden = map[string]bool{}
+		}
+		for id, hide := range changes {
+			if hide {
+				hidden[id] = true
+			} else {
+				delete(hidden, id)
+			}
+		}
+		if len(hidden) == 0 {
+			delete(accounts, key)
+		} else {
+			accounts[key] = hidden
+		}
+		config["hidden_conversations"], _ = json.Marshal(accounts)
+		return nil
 	})
 }
 

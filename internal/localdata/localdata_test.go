@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -40,7 +41,7 @@ func TestDefaultPathsSeparateConfigurationAndState(t *testing.T) {
 func TestModeRoundTripPreservesOtherConfiguration(t *testing.T) {
 	store := testStore(t)
 	mode, err := store.LoadMode()
-	if err != nil || mode != All {
+	if err != nil || mode != Visible {
 		t.Fatalf("default mode = %q, %v", mode, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(store.ConfigPath), 0700); err != nil {
@@ -49,7 +50,7 @@ func TestModeRoundTripPreservesOtherConfiguration(t *testing.T) {
 	if err := os.WriteFile(store.ConfigPath, []byte(`{"future_setting":true,"message_open_target":"browser"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []SidebarMode{UnreadFirst, UnreadOnly, All} {
+	for _, want := range []SidebarMode{Visible, UnreadFirst, UnreadOnly, Hidden, All} {
 		if err := store.SaveMode(context.Background(), want); err != nil {
 			t.Fatal(err)
 		}
@@ -252,5 +253,110 @@ func TestMalformedFilesAreReportedAndPreserved(t *testing.T) {
 	got, _ := os.ReadFile(store.StatePath)
 	if string(got) != string(invalid) {
 		t.Fatal("invalid read state was silently reset")
+	}
+}
+
+func TestHiddenConversationsPersistAndMergePerAccount(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	if err := store.SaveMode(ctx, Hidden); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveMessageOpenTarget(ctx, Browser); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []struct {
+		team, user string
+		ids        map[string]bool
+	}{
+		{"T1", "U1", map[string]bool{"C1": true, "D1": true}},
+		{"T1", "U1", map[string]bool{"G1": true}},
+		{"T2", "U1", map[string]bool{"C1": true}},
+		{"T1", "U2", map[string]bool{"D1": true}},
+		{"T1", "U1", map[string]bool{"C1": false}},
+	} {
+		if err := store.SaveHiddenConversations(ctx, change.team, change.user, change.ids); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restarted := &Store{ConfigPath: store.ConfigPath, StatePath: store.StatePath}
+	for _, account := range []struct {
+		team, user string
+		want       map[string]bool
+	}{
+		{"T1", "U1", map[string]bool{"D1": true, "G1": true}},
+		{"T2", "U1", map[string]bool{"C1": true}},
+		{"T1", "U2", map[string]bool{"D1": true}},
+		{"T3", "U3", map[string]bool{}},
+	} {
+		got, err := restarted.LoadHiddenConversations(account.team, account.user)
+		if err != nil || !reflect.DeepEqual(got, account.want) {
+			t.Fatalf("hidden for %s/%s = %v, %v; want %v", account.team, account.user, got, err, account.want)
+		}
+	}
+	// A later mode/target save must preserve the account's hidden choices.
+	if err := store.SaveMode(ctx, Visible); err != nil {
+		t.Fatal(err)
+	}
+	config, err := store.LoadConfig()
+	if err != nil || config.SidebarMode != Visible || config.MessageOpenTarget != Browser || len(config.HiddenConversations["T1/U1"]) != 2 {
+		t.Fatalf("settings lost: %+v, %v", config, err)
+	}
+	if _, err := os.Stat(store.StatePath); !os.IsNotExist(err) {
+		t.Fatalf("hiding touched read positions: %v", err)
+	}
+	info, _ := os.Stat(store.ConfigPath)
+	if info.Mode().Perm() != 0600 {
+		t.Fatalf("configuration permissions = %o", info.Mode().Perm())
+	}
+}
+
+func TestConcurrentHiddenConversationSavesPreserveOtherSettings(t *testing.T) {
+	store := testStore(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := store.SaveHiddenConversations(ctx, "T1", "U1", map[string]bool{"OLD": true}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 10)
+	for i := range 8 {
+		wg.Go(func() {
+			errs <- store.SaveHiddenConversations(ctx, "T1", "U1", map[string]bool{string(rune('A' + i)): true, "OLD": false})
+		})
+	}
+	wg.Go(func() { errs <- store.SaveMode(ctx, UnreadOnly) })
+	wg.Go(func() { errs <- store.SaveMessageOpenTarget(ctx, Browser) })
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	config, err := store.LoadConfig()
+	if err != nil || config.SidebarMode != UnreadOnly || config.MessageOpenTarget != Browser || len(config.HiddenConversations["T1/U1"]) != 8 || config.HiddenConversations["T1/U1"]["OLD"] {
+		t.Fatalf("concurrent saves lost choices: %+v, %v", config, err)
+	}
+}
+
+func TestInvalidHiddenConversationsAreReportedAndPreserved(t *testing.T) {
+	store := testStore(t)
+	if err := os.MkdirAll(filepath.Dir(store.ConfigPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"hidden_conversations":{"T1/U1":{"C1":"yes"}},"future_setting":true}`
+	if err := os.WriteFile(store.ConfigPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadHiddenConversations("T1", "U1"); err == nil {
+		t.Fatal("invalid hidden choices loaded")
+	}
+	if err := store.SaveHiddenConversations(context.Background(), "T1", "U1", map[string]bool{"C2": true}); err == nil {
+		t.Fatal("invalid hidden choices overwritten")
+	}
+	data, err := os.ReadFile(store.ConfigPath)
+	if err != nil || string(data) != content {
+		t.Fatalf("invalid configuration changed: %s, %v", data, err)
 	}
 }

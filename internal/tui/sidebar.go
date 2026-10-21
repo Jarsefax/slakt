@@ -31,6 +31,17 @@ func (m model) readingMain() bool {
 func (m model) sidebarConversations() []core.Conversation {
 	items := make([]core.Conversation, 0, len(m.conversations))
 	for _, c := range m.conversations {
+		switch m.sidebarMode {
+		case localdata.All:
+		case localdata.Hidden:
+			if !m.hidden[c.ID] {
+				continue
+			}
+		default:
+			if m.hidden[c.ID] {
+				continue
+			}
+		}
 		if m.sidebarMode != localdata.UnreadOnly || m.isUnread(c.ID) || c.ID == m.main.conversation.ID || m.sidebar && c.ID == m.sidebarReadID {
 			items = append(items, c)
 		}
@@ -114,6 +125,34 @@ func (m *model) markSidebarRead() {
 	m.status = "Marked " + c.Label() + " read"
 }
 
+func (m *model) toggleSidebarHidden() {
+	items := m.sidebarConversations()
+	if m.sideIndex < 0 || m.sideIndex >= len(items) {
+		return
+	}
+	c := items[m.sideIndex]
+	hide := !m.hidden[c.ID]
+	if m.hidden == nil {
+		m.hidden = map[string]bool{}
+	}
+	if m.hiddenDirty == nil {
+		m.hiddenDirty = map[string]bool{}
+	}
+	if hide {
+		m.hidden[c.ID] = true
+		m.status = "Hidden " + c.Label() + " · find it in Hidden or All"
+	} else {
+		delete(m.hidden, c.ID)
+		m.status = "Unhid " + c.Label()
+	}
+	m.hiddenDirty[c.ID] = hide
+	m.sidebarReadID = ""
+	// Keep the row when it still belongs to this mode; otherwise select the
+	// next row, or the previous row when removing the last item.
+	m.selectSidebar(c.ID)
+	m.persistLocal()
+}
+
 func newestTimestamp(messages []core.Message) string {
 	latest := ""
 	for _, msg := range messages {
@@ -145,6 +184,7 @@ func (m *model) markReadThrough(channel, latest string) {
 func (m *model) persistLocal() {
 	if m.options.Store == nil {
 		m.configDirty, m.readDirty = false, false
+		m.hiddenDirty = nil
 		return
 	}
 	// Local writes finish before the next key (and before quitting), avoiding
@@ -157,6 +197,13 @@ func (m *model) persistLocal() {
 			return
 		}
 		m.configDirty = false
+	}
+	if len(m.hiddenDirty) > 0 {
+		if err := m.options.Store.SaveHiddenConversations(ctx, m.identity.TeamID, m.identity.UserID, m.hiddenDirty); err != nil {
+			m.storageError = "Cannot save hidden conversations: " + err.Error()
+			return
+		}
+		m.hiddenDirty = nil
 	}
 	if m.readDirty {
 		if err := m.options.Store.SaveReadState(ctx, m.identity.TeamID, m.identity.UserID, m.readState); err != nil {

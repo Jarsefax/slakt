@@ -92,8 +92,8 @@ func TestModeKeyFollowsPlainQuitAvailabilityWithoutChangingFocus(t *testing.T) {
 				changed.composer.Value() != m.composer.Value() {
 				t.Fatal("m changed focus, selection, input, or pending operation")
 			}
-			changed, _ = key(changed, "mm")
-			if changed.sidebarMode != localdata.All {
+			changed, _ = key(changed, "mmmm")
+			if changed.sidebarMode != localdata.Visible {
 				t.Fatal("batched m keys did not cycle in order")
 			}
 			changed, cmd = key(changed, "mqm")
@@ -117,7 +117,7 @@ func TestModeKeyStaysLiteralInEveryTextEntryMode(t *testing.T) {
 			if entry == "i" {
 				value = m.composer.Value()
 			}
-			if value != "mmmm" || m.sidebarMode != localdata.All {
+			if value != "mmmm" || m.sidebarMode != localdata.Visible {
 				t.Fatalf("m activated a command in text entry: input=%q mode=%q", value, m.sidebarMode)
 			}
 		})
@@ -128,7 +128,7 @@ func TestModeKeyStaysLiteralInEveryTextEntryMode(t *testing.T) {
 		{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true},
 	} {
 		m, cmd := loadedModel(t).Update(input)
-		if m.(model).sidebarMode != localdata.All || cmd != nil {
+		if m.(model).sidebarMode != localdata.Visible || cmd != nil {
 			t.Fatal("pasted or modified m activated a command")
 		}
 	}

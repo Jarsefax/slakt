@@ -173,12 +173,26 @@ API is not used. Reopen slkt to reload directory metadata.
 
 Press `m` outside text entry to cycle the conversation sidebar mode, from any pane:
 
-- **All** keeps every conversation in its usual alphabetical order.
-- **Unread first** keeps every conversation, placing unread conversations first
-  within each section. Each unread/read group remains alphabetical.
-- **Unread only** shows unread conversations and the currently open conversation.
+- **Visible** (the default when no mode is saved) keeps every non-hidden
+  conversation in its usual alphabetical order.
+- **Unread first** keeps non-hidden conversations, placing unread conversations
+  first within each section. Each unread/read group remains alphabetical.
+- **Unread only** shows non-hidden unread conversations and the currently open
+  conversation, unless it is hidden.
   Opening a conversation marks it read locally after history loads successfully;
   its row stays visible until you switch away. Empty sections are hidden.
+- **Hidden** shows only hidden conversations, so they are easy to unhide.
+- **All** keeps every conversation, including hidden ones, in its usual
+  alphabetical order. Hidden conversations have a **×** marker.
+
+Press `h` with the sidebar focused to hide or unhide the highlighted channel,
+DM, or group DM. Hiding removes it from **Visible** and both unread modes;
+**Hidden** and **All** keep it accessible. A disappearing row selects its next
+neighbor, or the previous row at the end of the list. The open conversation,
+thread, and drafts stay intact. Hiding preserves read positions and does not
+change Slack settings or notifications. `Ctrl+k` and Slack search still find
+hidden conversations; opening one does not unhide it. Existing saved modes stay
+selected after upgrading.
 
 The current mode appears below **CONVERSATIONS**. A **●** marks conversations
 with unread messages. `Ctrl+k` always searches the full conversation directory.
@@ -221,13 +235,14 @@ UI configuration and read positions are stored separately:
 | UI settings | `~/.config/slakt/config.json` | `$XDG_CONFIG_HOME/slakt/config.json` |
 | Read positions | `~/.local/state/slakt/read-state.json` | `$XDG_STATE_HOME/slakt/read-state.json` |
 
-The configuration uses `"sidebar_mode": "all"`, `"unread-first"`, or
-`"unread-only"`; changing the mode saves it immediately without changing focus.
+The configuration uses `"sidebar_mode": "visible"`, `"unread-first"`,
+`"unread-only"`, `"hidden"`, or `"all"`; changing the mode saves it immediately
+without changing focus. Missing or empty modes default to `"visible"`.
 The `"message_open_target"` setting controls where `o` opens the selected message:
 
 ```json
 {
-  "sidebar_mode": "all",
+  "sidebar_mode": "visible",
   "message_open_target": "desktop"
 }
 ```
@@ -250,12 +265,18 @@ press opens only the chosen target; a launch failure is reported in the TUI.
 Invalid target values are reported on startup. Cycling the sidebar mode preserves
 the message target.
 
+Hidden conversation IDs are saved immediately in the UI configuration under
+`"hidden_conversations"`, scoped by `"TEAM_ID/USER_ID"`, with each hidden ID set
+to `true`. Choices survive restarts and conversation renames. Concurrent sessions
+merge changes to different conversation IDs; the latest save wins for the same
+ID. Hiding and unhiding preserve other settings and read positions.
+
 Read positions are scoped by workspace and account and saved when messages are read.
 Files contain IDs, timestamps, and settings, with no message text or credentials.
 Updates use private files and atomic replacement; concurrent sessions merge read
 positions without moving them backwards. Deleting the state file resets tracking
 on the next launch without changing the configured mode. Offline demo mode keeps
-both settings and read positions in memory and does not touch these files.
+settings, hidden choices, and read positions in memory and does not touch these files.
 
 ## TUI keys
 
@@ -267,7 +288,8 @@ day changes.
 | --- | --- |
 | `Ctrl+k` | Jump to a conversation or person; arrows choose a result |
 | `Tab` | Focus/unfocus the conversation sidebar |
-| `m` | Cycle All / Unread first / Unread only outside text entry, from any pane |
+| `m` | Cycle Visible / Unread first / Unread only / Hidden / All outside text entry, from any pane |
+| `h` | Hide/unhide the highlighted sidebar conversation |
 | `j/k`, arrows | Select a message; preview conversations while the sidebar has focus |
 | `PgUp/PgDn`, `Ctrl+u/d` | Scroll long messages |
 | `g/G` | First/last loaded message |
