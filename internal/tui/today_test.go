@@ -57,7 +57,7 @@ func TestTodaySeparatorUsesLocalCalendarDay(t *testing.T) {
 						want = 1
 						lines := strings.Split(content, "\n")
 						row := m.main.starts[test.index] - 1
-						if row < 0 || !strings.Contains(lines[row], " Today ") {
+						if row < 0 || lines[row] != ansi.Strip(todaySeparator(m.main.viewport.Width)) {
 							t.Fatalf("Today separator is not immediately above its first message:\n%s", content)
 						}
 						if ansi.StringWidth(lines[row]) != m.main.viewport.Width {
@@ -67,7 +67,7 @@ func TestTodaySeparatorUsesLocalCalendarDay(t *testing.T) {
 							t.Fatal("Today added an extra row instead of replacing the ordinary separator")
 						}
 					}
-					if strings.Count(content, "Today") != want {
+					if strings.Count(content, ansi.Strip(todaySeparator(m.main.viewport.Width))) != want {
 						t.Fatalf("want %d Today separators:\n%s", want, content)
 					}
 				})
@@ -85,7 +85,8 @@ func TestTodaySeparatorRefreshesCachedPanesAfterMidnight(t *testing.T) {
 			m.height = 15
 			m.searchActive = true
 			m.thread = &view{thread: "root", viewport: viewport.New(40, 3)}
-			panes := []*view{&m.main, &m.search, m.thread}
+			m.preview = &view{viewport: viewport.New(40, 3)}
+			panes := []*view{&m.main, &m.search, m.thread, m.preview}
 			for _, v := range panes {
 				v.messages = []core.Message{messageAt(before)}
 				if nextDayMessage {
@@ -94,6 +95,10 @@ func TestTodaySeparatorRefreshesCachedPanesAfterMidnight(t *testing.T) {
 				v.selected = len(v.messages) - 1
 				v.messages[v.selected].Text = strings.Repeat("Long message.\n", 8)
 				m.rebuildAt(v, false, before)
+				header := strings.Split(messageViewContent(*v), "\n")[v.starts[0]]
+				if !strings.Contains(header, "Today 23:59") {
+					t.Fatalf("current-day timestamp missing Today before midnight: %q", header)
+				}
 				v.viewport.SetYOffset(v.starts[v.selected] + 1)
 			}
 			m.refreshViews(after)
@@ -102,11 +107,18 @@ func TestTodaySeparatorRefreshesCachedPanesAfterMidnight(t *testing.T) {
 					t.Fatal("midnight refresh moved the scroll anchor")
 				}
 				content := messageViewContent(*v)
-				if strings.Contains(content, "Today") != nextDayMessage {
+				if strings.Contains(content, ansi.Strip(todaySeparator(v.viewport.Width))) != nextDayMessage {
 					t.Fatalf("stale Today separator after midnight:\n%s", content)
+				}
+				lines := strings.Split(content, "\n")
+				if header := lines[v.starts[0]]; !strings.Contains(header, "Oct 16 23:59") || strings.Contains(header, "Today") {
+					t.Fatalf("previous day's timestamp did not update: %q", header)
 				}
 				if nextDayMessage && !strings.Contains(strings.Split(content, "\n")[v.starts[1]-1], "Today") {
 					t.Fatalf("Today separator did not move to the new day:\n%s", content)
+				}
+				if nextDayMessage && !strings.Contains(lines[v.starts[1]], "Today 00:01") {
+					t.Fatalf("new day's timestamp missing Today: %q", lines[v.starts[1]])
 				}
 			}
 		})
@@ -134,7 +146,7 @@ func TestTodaySeparatorPreservesNavigationAndHistoryAnchors(t *testing.T) {
 		t.Fatal("loading older history moved the selection or scroll anchor")
 	}
 	assertMessageNumbers(t, m.main, []string{"1", "2", "1"})
-	if content := messageViewContent(m.main); strings.Count(content, "Today") != 1 {
+	if content := messageViewContent(m.main); strings.Count(content, ansi.Strip(todaySeparator(m.main.viewport.Width))) != 1 {
 		t.Fatalf("loading older history duplicated or removed Today:\n%s", content)
 	}
 
@@ -149,5 +161,40 @@ func TestTodaySeparatorPreservesNavigationAndHistoryAnchors(t *testing.T) {
 		if width, height := lipgloss.Size(m.View()); width > size[0] || height > size[1] {
 			t.Fatalf("Today separator overflows terminal %v: %dx%d", size, width, height)
 		}
+	}
+}
+
+func TestMessageTimestampsLabelTodayInEveryPane(t *testing.T) {
+	stockholm, err := time.LoadLocation("Europe/Stockholm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 21, 14, 32, 0, 0, stockholm)
+	start := time.Date(2026, 10, 21, 0, 0, 0, 0, stockholm)
+	m := loadedModel(t)
+	m.width = 140
+	m.searchActive = true
+	m.thread = &view{thread: "root", viewport: viewport.New(40, 3)}
+	m.preview = &view{viewport: viewport.New(40, 3)}
+	for _, pane := range []struct {
+		name string
+		view *view
+	}{
+		{"conversation", &m.main},
+		{"search", &m.search},
+		{"thread", m.thread},
+		{"preview", m.preview},
+	} {
+		t.Run(pane.name, func(t *testing.T) {
+			v := pane.view
+			v.messages = []core.Message{messageAt(start.Add(-time.Second)), messageAt(start), messageAt(now), messageAt(start.AddDate(0, 0, 1))}
+			m.rebuildAt(v, false, now)
+			lines := strings.Split(messageViewContent(*v), "\n")
+			for i, want := range []string{"Oct 20 23:59", "Today 00:00", "Today 14:32", "Oct 22 00:00"} {
+				if header := lines[v.starts[i]]; !strings.Contains(header, want) {
+					t.Fatalf("message %d header = %q, want %q", i, header, want)
+				}
+			}
+		})
 	}
 }

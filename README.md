@@ -281,7 +281,9 @@ settings, hidden choices, and read positions in memory and does not touch these 
 ## TUI keys
 
 A bold **Today** separator marks the first loaded message from the current local
-calendar day in conversations, threads, and search. It refreshes when the local
+calendar day in conversations, threads, and search. Each current-day message also
+shows **Today HH:MM** in its timestamp, including in conversation previews and CLI
+output. Older messages show **Mon DD HH:MM**. The TUI labels refresh when the local
 day changes.
 
 | Key | Action |

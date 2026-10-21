@@ -45,7 +45,7 @@ type view struct {
 	viewport     viewport.Model
 	starts       []int
 	numbered     bool   // Number visibility in the cached viewport.
-	day          string // Local date used by the cached Today separator.
+	day          string // Local date used by cached Today labels.
 	todayIndex   int    // First message below the Today separator, or -1.
 	cursor       string
 	hasMore      bool
@@ -460,7 +460,7 @@ func (m *model) rebuildAt(v *view, anchor bool, now time.Time) {
 			metadataStyle = metadataStyle.Background(selectedStyle.GetBackground())
 			threadStyle = threadStyle.Background(selectedStyle.GetBackground())
 		}
-		header := authorStyle.Render(render.Author(msg, m.names)) + metadataStyle.Render("  "+render.Time(msg.Timestamp))
+		header := authorStyle.Render(render.Author(msg, m.names)) + metadataStyle.Render("  "+render.TimeAt(msg.Timestamp, now))
 		if m.searchActive && v == &m.search {
 			header = authorStyle.Render(render.Safe(msg.ChannelID)) + metadataStyle.Render(" · ") + header
 		}

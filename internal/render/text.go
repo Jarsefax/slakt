@@ -70,12 +70,22 @@ func Text(text string, names map[string]string) string {
 }
 
 func Time(ts string) string {
+	return TimeAt(ts, time.Now())
+}
+
+// TimeAt labels today's messages using now's calendar date and location.
+func TimeAt(ts string, now time.Time) string {
 	sec, _, _ := strings.Cut(ts, ".")
 	n, err := strconv.ParseInt(sec, 10, 64)
 	if err != nil {
 		return Safe(ts)
 	}
-	return time.Unix(n, 0).Local().Format("Jan 02 15:04")
+	messageTime := time.Unix(n, 0).In(now.Location())
+	year, month, day := messageTime.Date()
+	if year == now.Year() && month == now.Month() && day == now.Day() {
+		return messageTime.Format("Today 15:04")
+	}
+	return messageTime.Format("Jan 02 15:04")
 }
 
 // Author resolves the display name at the terminal boundary.
