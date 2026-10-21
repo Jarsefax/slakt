@@ -121,6 +121,26 @@ func (m *model) markSidebarRead() {
 		return
 	}
 	m.sidebarReadID = c.ID
+	m.markConversationRead(v)
+}
+
+func (m *model) markOpenConversationRead() {
+	if m.searchActive {
+		m.status = "Return to a conversation to mark it read"
+		return
+	}
+	if m.main.conversation.ID == "" {
+		return
+	}
+	if m.main.loading {
+		m.status = "Wait for the conversation to load before marking read"
+		return
+	}
+	m.markConversationRead(&m.main)
+}
+
+func (m *model) markConversationRead(v *view) {
+	c := v.conversation
 	if c.ID == m.main.conversation.ID {
 		m.main.startup = false
 	}

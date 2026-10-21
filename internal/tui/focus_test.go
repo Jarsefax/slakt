@@ -52,7 +52,7 @@ func TestNumbersFollowSidebarThreadAndTextEntryFocus(t *testing.T) {
 			m, _ = key(m, "tab")
 			assertMessageNumbers(t, *m.thread, []string{"2", "1", "3"})
 
-			for _, entry := range []string{"i", "/", "ctrl+k", "r", "?"} {
+			for _, entry := range []string{"i", "/", "ctrl+k", "e", "?"} {
 				m, _ = key(m, entry)
 				assertNoMessageNumbers(t, m.main)
 				assertNoMessageNumbers(t, *m.thread)

@@ -37,7 +37,7 @@ func New() *Backend {
 	root := add("CGENERAL", "UALICE", "The first version is ready to explore. Open this thread with Enter and tell us what you think.", 8)
 	b.history["CGENERAL"][2].ReplyCount = 2
 	b.threads[root.Timestamp] = []core.Message{root, {ChannelID: "CGENERAL", Timestamp: fmt.Sprintf("%d.000001", base+600), ThreadTS: root.Timestamp, UserID: "USAM", Text: "Channels, DMs, search, and threads—all from here."}, {ChannelID: "CGENERAL", Timestamp: fmt.Sprintf("%d.000001", base+660), ThreadTS: root.Timestamp, UserID: "UALICE", Text: "This is an offline demo. Nothing you type here reaches Slack."}}
-	add("CGENERAL", "USAM", "Search with /, react with r, or press ? for the keyboard guide.", 15)
+	add("CGENERAL", "USAM", "Search with /, react with e, mark read with r, or press ? for the keyboard guide.", 15)
 	add("CGENERAL", "UALICE", "Your draft stays here while you switch conversations. Ctrl+s sends it; Esc returns to browsing.", 18)
 	add("CENGINEERING", "USAM", "Deploy notes for today:\n```\ngo test ./...\nCGO_ENABLED=0 go build ./cmd/slkt\n```", 2)
 	add("CENGINEERING", "UALICE", "The deploy looks *good*. Thanks <@USAM>! _Ready for review._ ~Pending~", 5)

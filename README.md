@@ -212,6 +212,11 @@ you move up or down to another conversation; then it disappears unless new
 unread messages have arrived. Navigation at a list boundary keeps the row.
 Leaving sidebar browsing also releases the retained row.
 
+Press `r` while browsing an open channel or DM, including its thread, to mark
+that conversation read locally without changing focus, selection, scroll position,
+or drafts. Search results must be closed first. Use `e` to add an emoji reaction
+to the selected message.
+
 Messages in an open conversation are marked read as they arrive while browsing
 its timeline. Read tracking pauses while the conversation sidebar has focus,
 including during background refreshes. Messages received while its timeline is
@@ -226,7 +231,8 @@ conversation is available, slkt opens the first eligible conversation.
 Any conversation opened by startup keeps its unread state, including through
 polling, reloading, resizing, and pane changes. To resume normal read marking,
 deliberately reopen it with sidebar `Enter` or `Ctrl+k`, or mark it read with
-sidebar `r`. Previewing other conversations does not change the saved selection.
+`r` in the sidebar or open conversation. Previewing other conversations does not
+change the saved selection.
 
 A bright **New messages** divider separates older history from messages newer
 than the local read position captured when you opened the conversation or its
@@ -331,14 +337,15 @@ The TUI labels refresh when the local day changes.
 | `Esc` | Leave sidebar preview / save draft in this session / close thread or search |
 | `/` | Search |
 | `n` | Load another history/thread page or search page |
-| `r` | Mark the highlighted sidebar conversation read; otherwise add a reaction by emoji name |
+| `r` | Mark the highlighted sidebar conversation or open channel/DM read |
+| `e` | Add a reaction to the selected message by emoji name |
 | `o` | Open selected message in desktop Slack (default) or the configured browser target |
 | `R` | Reload current conversation |
 | `?` | Keybinding guide |
 | `q` | Quit outside text entry, including help and pending operations |
 | `Ctrl+c` | Quit in any TUI mode |
 
-Text entry starts only when you press `i`, `/`, or `Ctrl+k`, or use `r` outside
+Text entry starts only when you press `i`, `/`, or `Ctrl+k`, or use `e` outside
 the sidebar. Opening a channel or thread, restoring a saved draft, refreshing,
 and resizing never activate an input. Text-entry modes are labeled **COMPOSE**,
 **SEARCH**, **JUMP**, or **REACT**.

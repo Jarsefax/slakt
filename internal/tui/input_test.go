@@ -106,7 +106,7 @@ func TestModeKeyFollowsPlainQuitAvailabilityWithoutChangingFocus(t *testing.T) {
 }
 
 func TestModeKeyStaysLiteralInEveryTextEntryMode(t *testing.T) {
-	for _, entry := range []string{"i", "/", "ctrl+k", "r"} {
+	for _, entry := range []string{"i", "/", "ctrl+k", "e"} {
 		t.Run(entry, func(t *testing.T) {
 			m := loadedModel(t)
 			m, _ = key(m, entry)
@@ -137,14 +137,14 @@ func TestModeKeyStaysLiteralInEveryTextEntryMode(t *testing.T) {
 func TestUndersizedTerminalCannotStartHiddenTextEntry(t *testing.T) {
 	m := loadedModel(t)
 	m.width = 20
-	for _, entry := range []string{"i", "/", "ctrl+k", "r"} {
+	for _, entry := range []string{"i", "/", "ctrl+k", "e"} {
 		m, _ = key(m, entry)
 		assertBrowsing(t, m)
 	}
 }
 
 func TestQuitCharactersRemainTextInExplicitInputModes(t *testing.T) {
-	for _, entry := range []string{"i", "/", "ctrl+k", "r"} {
+	for _, entry := range []string{"i", "/", "ctrl+k", "e"} {
 		t.Run(entry, func(t *testing.T) {
 			m := loadedModel(t)
 			assertBrowsing(t, m)
@@ -167,6 +167,70 @@ func TestQuitCharactersRemainTextInExplicitInputModes(t *testing.T) {
 			_, cmd = key(m, "q")
 			assertQuit(t, cmd)
 		})
+	}
+}
+
+func TestReadAndReactionKeysRemainTextInExplicitInputModes(t *testing.T) {
+	for _, entry := range []string{"i", "/", "ctrl+k", "e"} {
+		t.Run(entry, func(t *testing.T) {
+			m := loadedModel(t)
+			m.main.startup = true
+			channel := m.main.conversation.ID
+			m.observeLatest(channel, "2000000000.000004")
+			position := m.readState.Position(channel)
+			m, _ = key(m, entry)
+			m, _ = key(m, "rere")
+			value := m.input.Value()
+			if entry == "i" {
+				value = m.composer.Value()
+			}
+			if value != "rere" || !m.main.startup || m.readState.Position(channel) != position {
+				t.Fatal("r/e did not remain literal text or marked the conversation read")
+			}
+		})
+	}
+}
+
+func TestEmojiShortcutReactsToSelectedMessage(t *testing.T) {
+	for _, state := range []string{"timeline", "thread", "search"} {
+		t.Run(state, func(t *testing.T) {
+			m := loadedModel(t)
+			if state == "thread" {
+				var load tea.Cmd
+				m, load = key(m, "enter")
+				updated, _ := m.Update(load())
+				m = updated.(model)
+			} else if state == "search" {
+				m, _ = key(m, "/")
+				m, _ = key(m, "deploy")
+				var load tea.Cmd
+				m, load = key(m, "enter")
+				updated, _ := m.Update(load())
+				m = updated.(model)
+			}
+			v := m.active()
+			message := v.messages[v.selected]
+			m, _ = key(m, "e")
+			if m.mode != "react" || !m.input.Focused() {
+				t.Fatal("e did not open the reaction prompt")
+			}
+			m, _ = key(m, "thumbsup")
+			m, send := key(m, "enter")
+			result := send().(reactionResult)
+			if result.err != nil || result.channel != message.ChannelID || result.ts != message.Timestamp || result.name != "thumbsup" {
+				t.Fatalf("reaction targeted the wrong message or failed: %+v", result)
+			}
+		})
+	}
+	for _, input := range []tea.KeyMsg{
+		{Type: tea.KeyRunes, Runes: []rune{'e'}, Paste: true},
+		{Type: tea.KeyRunes, Runes: []rune{'e'}, Alt: true},
+	} {
+		updated, cmd := loadedModel(t).Update(input)
+		assertBrowsing(t, updated.(model))
+		if cmd != nil {
+			t.Fatal("pasted or modified e opened the reaction prompt")
+		}
 	}
 }
 

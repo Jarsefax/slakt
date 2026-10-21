@@ -41,12 +41,12 @@ def check_quit_paths(binary, environment):
         ("rapid Esc q in composer", [b"i", b"draft"], b"\x1bq"),
         ("rapid Esc q in search", [b"/"], b"\x1bq"),
         ("rapid Esc q in jump", [b"\x0b"], b"\x1bq"),
-        ("rapid Esc q in reaction", [b"r"], b"\x1bq"),
+        ("rapid Esc q in reaction", [b"e"], b"\x1bq"),
         ("after successful send", [b"i", b"draft", b"\x13"], b"q"),
         ("literal q in composer", [b"i", b"qqq"], b"\x03"),
         ("literal q in search", [b"/", b"qqq"], b"\x03"),
         ("literal q in jump", [b"\x0b", b"qqq"], b"\x03"),
-        ("literal q in reaction", [b"r", b"qqq"], b"\x03"),
+        ("literal q in reaction", [b"e", b"qqq"], b"\x03"),
         ("grouped explicit text entry", [b"iq"], b"\x03"),
         ("pasted commands", [b"\x1b[200~iqqq\x1b[201~"], b"q"),
     ]
@@ -107,6 +107,10 @@ def main():
         assert "checking —" in initial, "idle checking slot missing from footer"
         for section in ("Starred", "Channels", "Direct messages", "Group messages"):
             assert section in initial, f"sidebar section missing: {section}"
+        assert "Marked #engineering read" in send(b"r"), "r did not mark the startup conversation read"
+        assert "REACT" in send(b"e"), "e did not open the reaction prompt"
+        send(b"thumbsup")
+        assert "Reaction added" in send(b"\r"), "emoji reaction failed"
         send(b"\t")
         send(b"j")
         assert "#general" in send(b"\r"), "sidebar navigation selected a heading"
@@ -167,7 +171,7 @@ def main():
         assert f"slkt {version}" in narrow, "compact unread status displaced the version"
         send(b"q")
         assert process.wait(timeout=3) == 0, "TUI exited unsuccessfully"
-        print("PASS: grouped sidebar/navigation, message numbers, thread indicators, channel jump, formatted thread send with emoji, search/result thread, DM send, hide/unhide and five sidebar modes, resize, help, quit (offline PTY)")
+        print("PASS: startup r mark read, e emoji reaction, grouped sidebar/navigation, message numbers, thread indicators, channel jump, formatted thread send with emoji, search/result thread, DM send, hide/unhide and five sidebar modes, resize, help, quit (offline PTY)")
         check_quit_paths(binary, environment)
     finally:
         if process.poll() is None:

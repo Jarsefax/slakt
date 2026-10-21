@@ -101,7 +101,7 @@ func TestStartupRestoresLastOpenedConversationWithoutReading(t *testing.T) {
 }
 
 func TestStartupReadExemptionEndsOnExplicitOpenOrMarkRead(t *testing.T) {
-	for _, action := range []string{"sidebar open", "jump", "mark read"} {
+	for _, action := range []string{"sidebar open", "jump", "sidebar mark read", "timeline mark read"} {
 		t.Run(action, func(t *testing.T) {
 			root := t.TempDir()
 			store := &localdata.Store{ConfigPath: filepath.Join(root, "config.json"), StatePath: filepath.Join(root, "read-state.json")}
@@ -134,10 +134,13 @@ func TestStartupReadExemptionEndsOnExplicitOpenOrMarkRead(t *testing.T) {
 				m, _ = key(m, "ctrl+k")
 				m, _ = key(m, "engineering")
 				m, load = key(m, "enter")
-			case "mark read":
+			case "sidebar mark read":
 				m, _ = key(m, "tab")
 				m, _ = key(m, "r")
 				m, _ = key(m, "tab")
+				load = nil
+			case "timeline mark read":
+				m, _ = key(m, "r")
 				load = nil
 			}
 			if load != nil {
@@ -161,7 +164,7 @@ func TestStartupReadExemptionEndsOnExplicitOpenOrMarkRead(t *testing.T) {
 				t.Fatalf("normal automatic read marking did not resume: %+v, %v", stored, err)
 			}
 			want := "CENGINEERING"
-			if action == "mark read" {
+			if action == "sidebar mark read" || action == "timeline mark read" {
 				want = "DALICE"
 			}
 			config, err := store.LoadConfig()

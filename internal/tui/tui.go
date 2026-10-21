@@ -1247,7 +1247,11 @@ func (m model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.loadCmd(*v, false)
 		}
 	case "r":
-		if len(v.messages) > 0 {
+		if m.isCommandKey(key, "r") {
+			m.markOpenConversationRead()
+		}
+	case "e":
+		if m.isCommandKey(key, "e") && len(v.messages) > 0 {
 			return m, m.prompt("react", "Emoji name, e.g. thumbsup")
 		}
 	case "o":
@@ -1465,8 +1469,8 @@ func pane(v view, width, height int, label string) string {
 }
 
 func helpLines(width int) []string {
-	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Mark sidebar conversation read / add a reaction\nh         Hide/unhide highlighted sidebar conversation\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry: i, /, Ctrl+k; r outside the sidebar.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: Visible / Unread first / Unread only / Hidden / All.\nVisible and unread modes exclude hidden conversations.\nHidden shows only hidden conversations; All includes everything.\n× Conversation: hidden in slkt. h in the sidebar toggles hiding.\nCtrl+k and search still find hidden conversations.\nSidebar arrows/j/k preview without marking read.\nr marks the highlighted conversation read.\nIts preview stays; Unread only keeps its row until you move away.\nEnter opens; Tab/Esc returns to the original view.\nIn Unread only, the open conversation stays listed unless hidden.\n\nUpdates use polling. Drafts live only in this process."
-	text += "\nStartup restores the last open conversation without marking read.\nReopen via sidebar Enter/Ctrl+k, or mark read with sidebar r."
+	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Mark sidebar/open conversation read\ne         Add an emoji reaction\nh         Hide/unhide highlighted sidebar conversation\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry: i, /, Ctrl+k; e outside the sidebar.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: Visible / Unread first / Unread only / Hidden / All.\nVisible and unread modes exclude hidden conversations.\nHidden shows only hidden conversations; All includes everything.\n× Conversation: hidden in slkt. h in the sidebar toggles hiding.\nCtrl+k and search still find hidden conversations.\nSidebar arrows/j/k preview without marking read.\nr marks the highlighted sidebar or open conversation read.\nThe sidebar preview stays; Unread only keeps its row until you move away.\nIn a thread, r marks its conversation read; close search first.\nEnter opens; Tab/Esc returns to the original view.\nIn Unread only, the open conversation stays listed unless hidden.\n\nUpdates use polling. Drafts live only in this process."
+	text += "\nStartup restores the last open conversation without marking read.\nReopen via sidebar Enter/Ctrl+k, or mark read with r."
 	return strings.Split(ansi.Wrap(text, max(20, width-2), ""), "\n")
 }
 
@@ -1556,12 +1560,15 @@ func (m model) View() string {
 			}
 			action = "↑/↓ preview  " + hideAction + "  r: read  Enter: open  Tab/Esc: back  "
 		case m.thread != nil:
-			action = "Esc: back  "
+			action = "e: react  Esc: back  "
 		case len(v.messages) > 0:
-			action = "Enter: start thread  "
+			action = "e: react  Enter: start thread  "
 			if threadIndicator(v.messages[v.selected]) != "" {
-				action = "Enter: open thread  "
+				action = "e: react  Enter: open thread  "
 			}
+		}
+		if !m.sidebar && !m.searchActive {
+			action = "r: read  " + action
 		}
 		bottom = muted.Render(fit(" q quit  m mode  i compose  "+action+"Ctrl+k jump  / search  ? help", m.width))
 		if draft := m.drafts[draftKey(m.main.conversation.ID, "")]; draft != "" {
