@@ -236,12 +236,35 @@ func (m *model) persistLocal() {
 
 // A single round-robin request at a time starts at most 20 checks/minute.
 // Larger workspaces take longer to scan, rather than creating request bursts.
-func (m model) unreadTick() tea.Cmd {
+func (m model) unreadInterval() time.Duration {
 	interval := 3 * time.Second
 	if len(m.conversations) > 0 {
 		interval = max(interval, m.options.PollInterval/time.Duration(len(m.conversations)))
 	}
-	return tea.Tick(interval, func(t time.Time) tea.Msg { return unreadTickMsg(t) })
+	return interval
+}
+
+func (m model) unreadTick() tea.Cmd {
+	return tea.Tick(time.Until(m.nextUnreadCheck), func(t time.Time) tea.Msg { return unreadTickMsg(t) })
+}
+
+func (m *model) scheduleUnreadCheck() tea.Cmd {
+	m.nextUnreadCheck = time.Now().Add(m.unreadInterval())
+	return m.unreadTick()
+}
+
+// Rendering and dispatch use the same queue, including when the user changes
+// the open conversation while a background request is running.
+func (m model) nextUnreadConversation() (core.Conversation, int) {
+	if m.identity.TeamID != "" {
+		for offset := range m.conversations {
+			i := (m.unreadIndex + offset) % len(m.conversations)
+			if c := m.conversations[i]; c.ID != m.main.conversation.ID {
+				return c, i
+			}
+		}
+	}
+	return core.Conversation{}, 0
 }
 
 func (m model) unreadCmd(channel string) tea.Cmd {

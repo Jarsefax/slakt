@@ -99,6 +99,8 @@ type model struct {
 	latest                               map[string]string
 	unreadIndex                          int
 	unreadPolling                        bool
+	unreadCurrent                        core.Conversation
+	nextUnreadCheck                      time.Time
 	unreadError                          string
 	storageError                         string
 	configDirty, readDirty               bool
@@ -204,7 +206,7 @@ func newModel(ctx context.Context, s *core.Service, opts Options) model {
 	composer.ShowLineNumbers = false
 	composer.KeyMap.InsertNewline.SetKeys("enter", "alt+enter")
 	now := time.Now()
-	return model{ctx: ctx, service: s, options: opts, input: input, composer: composer, drafts: map[string]string{}, names: map[string]string{}, sidebarMode: localdata.Visible, hidden: map[string]bool{}, messageOpenTarget: localdata.Desktop, openMessage: platform.OpenSlackMessage, readState: localdata.NewReadState(now), latest: map[string]string{}, nextPoll: now.Add(opts.PollInterval), width: 100, height: 30, status: "Connecting…", main: view{viewport: viewport.New(60, 15)}, search: view{viewport: viewport.New(60, 15)}}
+	return model{ctx: ctx, service: s, options: opts, input: input, composer: composer, drafts: map[string]string{}, names: map[string]string{}, sidebarMode: localdata.Visible, hidden: map[string]bool{}, messageOpenTarget: localdata.Desktop, openMessage: platform.OpenSlackMessage, readState: localdata.NewReadState(now), latest: map[string]string{}, nextPoll: now.Add(opts.PollInterval), nextUnreadCheck: now.Add(3 * time.Second), width: 100, height: 30, status: "Connecting…", main: view{viewport: viewport.New(60, 15)}, search: view{viewport: viewport.New(60, 15)}}
 }
 
 func (m model) Init() tea.Cmd {
@@ -235,14 +237,37 @@ func (m model) pollIndicator(now time.Time) string {
 
 func (m model) footer(now time.Time) string {
 	poll := " " + m.pollIndicator(now)
-	if m.options.Version == "" {
-		return fit(poll+" · "+m.identity.User, m.width)
+	// Keep the unread slots still when the active poll starts or completes.
+	poll += strings.Repeat(" ", max(0, ansi.StringWidth(" poll [■■■■■] polling…")-ansi.StringWidth(poll)))
+	versionWidth := m.width - ansi.StringWidth(poll) - 1
+	if m.width >= unreadInlineWidth {
+		// Reserve a readable unread status before fitting a development version.
+		versionWidth -= 3 + unreadMinimumWidth
 	}
-	version := fit("slkt "+m.options.Version, m.width-ansi.StringWidth(poll)-1)
+	version := ""
+	if m.options.Version != "" {
+		version = fit("slkt "+m.options.Version, versionWidth)
+	}
 	left := poll
-	remaining := m.width - ansi.StringWidth(version) - 1 - ansi.StringWidth(poll)
+	remaining := m.width - ansi.StringWidth(left)
+	if version != "" {
+		remaining -= ansi.StringWidth(version) + 1
+	}
+	if m.width >= unreadInlineWidth {
+		identityWidth := min(16, ansi.StringWidth(fit(m.identity.User, 16)), max(0, remaining-3-unreadMinimumWidth-3))
+		unreadWidth := remaining - 3
+		if identityWidth > 0 {
+			unreadWidth -= 3 + identityWidth
+		}
+		unread := m.unreadIndicator(now, unreadWidth)
+		left += " · " + unread
+		remaining -= 3 + ansi.StringWidth(unread)
+	}
 	if remaining > 3 && m.identity.User != "" {
 		left += " · " + fit(m.identity.User, remaining-3)
+	}
+	if version == "" {
+		return fit(left, m.width)
 	}
 	return left + strings.Repeat(" ", m.width-ansi.StringWidth(left)-ansi.StringWidth(version)) + version
 }
@@ -437,6 +462,9 @@ func (m *model) dimensions() (int, int, int) {
 	}
 	content := max(20, m.width-side-3)
 	height := max(3, m.height-12)
+	if m.width < unreadInlineWidth {
+		height = max(2, m.height-13)
+	}
 	return side, content, height
 }
 
@@ -739,26 +767,24 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if m.unreadPolling {
 			return m, nil
 		}
-		if m.identity.TeamID != "" {
-			for range m.conversations {
-				i := m.unreadIndex % len(m.conversations)
-				m.unreadIndex = (i + 1) % len(m.conversations)
-				if channel := m.conversations[i].ID; channel != m.main.conversation.ID {
-					m.unreadPolling = true
-					return m, m.unreadCmd(channel)
-				}
-			}
+		if c, i := m.nextUnreadConversation(); c.ID != "" {
+			m.unreadIndex = (i + 1) % len(m.conversations)
+			m.unreadPolling = true
+			m.unreadCurrent = c
+			m.nextUnreadCheck = time.Time{}
+			return m, m.unreadCmd(c.ID)
 		}
-		return m, m.unreadTick()
+		return m, m.scheduleUnreadCheck()
 	case unreadResult:
 		m.unreadPolling = false
+		m.unreadCurrent = core.Conversation{}
 		if msg.err != nil {
 			m.unreadError = "Unread check paused: " + msg.err.Error()
 		} else {
 			m.unreadError = ""
 			m.observeLatest(msg.channel, msg.latest)
 		}
-		return m, m.unreadTick()
+		return m, m.scheduleUnreadCheck()
 	case pollCountdownMsg:
 		return m, pollCountdownTick()
 	case tickMsg:
@@ -1555,6 +1581,11 @@ func (m model) View() string {
 	if m.storageError != "" {
 		statusText = m.storageError
 	}
-	status := muted.Render(" "+fit(statusText, m.width-3)) + "\n" + muted.Render(m.footer(time.Now()))
+	now := time.Now()
+	status := muted.Render(" " + fit(statusText, m.width-3))
+	if m.width < unreadInlineWidth {
+		status += "\n" + muted.Render(" "+m.unreadIndicator(now, m.width-1))
+	}
+	status += "\n" + muted.Render(m.footer(now))
 	return header + "\n" + separator(m.width) + "\n" + body + "\n" + separator(m.width) + "\n" + bottom + "\n" + status
 }

@@ -103,6 +103,8 @@ def main():
         initial = read(1)
         assert "OFFLINE DEMO" in initial, "initial demo frame missing"
         assert f"slkt {version}" in initial, "footer version differs from --version"
+        assert "unread: next #general in " in initial, "unread queue/countdown missing from footer"
+        assert "checking —" in initial, "idle checking slot missing from footer"
         for section in ("Starred", "Channels", "Direct messages", "Group messages"):
             assert section in initial, f"sidebar section missing: {section}"
         send(b"\t")
@@ -158,6 +160,11 @@ def main():
         read()
         assert "Keyboard guide" in send(b"?"), "help missing after resize"
         send(b"j")
+        fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 15, 40, 0, 0))
+        process.send_signal(signal.SIGWINCH)
+        narrow = read()
+        assert "unread: next " in narrow and " · checking " in narrow, "compact unread slots missing at the minimum terminal size"
+        assert f"slkt {version}" in narrow, "compact unread status displaced the version"
         send(b"q")
         assert process.wait(timeout=3) == 0, "TUI exited unsuccessfully"
         print("PASS: grouped sidebar/navigation, message numbers, thread indicators, channel jump, formatted thread send with emoji, search/result thread, DM send, hide/unhide and five sidebar modes, resize, help, quit (offline PTY)")

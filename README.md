@@ -376,6 +376,11 @@ expansion. Unsaved drafts do not survive process exit or a crash.
 - The footer shows a small progress bar and seconds until the next poll. It
   displays `polling…` while refreshing, then restarts the countdown when the
   request finishes.
+- Beside the poll countdown, the unread status keeps `next` first and `checking`
+  in fixed positions, shortening long names within their slots. Between checks,
+  `next` counts down to the next request and `checking` shows `—`. The countdown
+  starts when the previous request finishes. At narrow widths both slots use a
+  separate compact line.
 - Inactive conversations are checked one at a time for local unread indicators,
   requesting at most one history item per check. Checks are at least three seconds
   apart (slower if configured polling permits), starting at most 20 checks
