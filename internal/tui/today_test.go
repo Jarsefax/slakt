@@ -49,6 +49,7 @@ func TestTodaySeparatorUsesLocalCalendarDay(t *testing.T) {
 			} {
 				t.Run(test.name, func(t *testing.T) {
 					m := loadedModel(t)
+					m.main.newAfter = "" // Isolate calendar separators from unread tracking.
 					m.main.messages, m.main.selected = test.messages, 0
 					m.rebuildAt(&m.main, false, now)
 					content := messageViewContent(m.main)
@@ -88,6 +89,7 @@ func TestTodaySeparatorRefreshesCachedPanesAfterMidnight(t *testing.T) {
 			m.preview = &view{viewport: viewport.New(40, 3)}
 			panes := []*view{&m.main, &m.search, m.thread, m.preview}
 			for _, v := range panes {
+				v.newAfter = ""
 				v.messages = []core.Message{messageAt(before)}
 				if nextDayMessage {
 					v.messages = append(v.messages, messageAt(after))
@@ -130,6 +132,7 @@ func TestTodaySeparatorPreservesNavigationAndHistoryAnchors(t *testing.T) {
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	m := loadedModel(t)
 	m.height = 15
+	m.main.newAfter = ""
 	m.main.messages = []core.Message{messageAt(start), messageAt(start.Add(time.Minute))}
 	m.main.selected = 0
 	m.rebuild(&m.main, false)
@@ -187,6 +190,7 @@ func TestMessageTimestampsLabelTodayInEveryPane(t *testing.T) {
 	} {
 		t.Run(pane.name, func(t *testing.T) {
 			v := pane.view
+			v.newAfter = ""
 			v.messages = []core.Message{messageAt(start.Add(-time.Second)), messageAt(start), messageAt(now), messageAt(start.AddDate(0, 0, 1))}
 			m.rebuildAt(v, false, now)
 			lines := strings.Split(messageViewContent(*v), "\n")

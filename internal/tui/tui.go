@@ -46,7 +46,9 @@ type view struct {
 	starts       []int
 	numbered     bool   // Number visibility in the cached viewport.
 	day          string // Local date used by cached Today labels.
-	todayIndex   int    // First message below the Today separator, or -1.
+	todayIndex   int    // First current-day message, or -1; New messages can replace its divider.
+	newAfter     string // Read position captured when this conversation view opened.
+	newIndex     int    // First loaded message newer than newAfter, or -1.
 	cursor       string
 	hasMore      bool
 	loading      bool
@@ -288,7 +290,7 @@ func (m *model) switchTo(c core.Conversation) tea.Cmd {
 	m.searchActive = false
 	m.sidebar = false
 	m.clearPreview()
-	m.main = view{conversation: c, loading: true, generation: m.main.generation + 1, viewport: viewport.New(60, 15)}
+	m.main = view{conversation: c, newAfter: m.readState.Position(c.ID), loading: true, generation: m.main.generation + 1, viewport: viewport.New(60, 15)}
 	m.selectSidebar(c.ID)
 	m.restoreDraft()
 	m.status = "Loading " + c.Label() + "…"
@@ -427,6 +429,7 @@ func (m *model) rebuildAt(v *view, anchor bool, now time.Time) {
 	v.numbered = m.numbersVisible(v)
 	v.day = now.Format("2006-01-02")
 	v.todayIndex = -1
+	v.newIndex = -1
 	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	start, end := startOfDay.Unix(), startOfDay.AddDate(0, 0, 1).Unix()
 	// Reserve three digits for the 500-message cache, keeping text aligned as
@@ -437,10 +440,19 @@ func (m *model) rebuildAt(v *view, anchor bool, now time.Time) {
 	for i, msg := range v.messages {
 		seconds, _, _ := strings.Cut(msg.Timestamp, ".")
 		ts, err := strconv.ParseInt(seconds, 10, 64)
-		if v.todayIndex < 0 && err == nil && ts >= start && ts < end {
-			lines = append(lines, todaySeparator(width))
+		today := v.todayIndex < 0 && err == nil && ts >= start && ts < end
+		fresh := v.newIndex < 0 && v.newAfter != "" && msg.Timestamp > v.newAfter
+		if today {
 			v.todayIndex = i
-		} else if i > 0 {
+			if !fresh {
+				lines = append(lines, todaySeparator(width))
+			}
+		}
+		if fresh {
+			lines = append(lines, newMessagesSeparator(width))
+			v.newIndex = i
+		}
+		if !today && !fresh && i > 0 {
 			lines = append(lines, separator(width))
 		}
 		v.starts = append(v.starts, len(lines))
@@ -522,15 +534,19 @@ func (m *model) reveal(v *view) {
 		return
 	}
 	start := v.starts[v.selected]
-	if v.selected == v.todayIndex {
-		start-- // Reveal the Today label with its first message.
-	}
+	start -= v.labelRows(v.selected)
 	if start < v.viewport.YOffset {
 		v.viewport.SetYOffset(start)
 	}
 	end := v.viewport.TotalLineCount()
 	if v.selected+1 < len(v.starts) {
-		end = v.starts[v.selected+1] - 1 // Exclude the separator before the next message.
+		end = v.starts[v.selected+1] - max(1, v.labelRows(v.selected+1))
+	}
+	if v.selected == v.newIndex && end-start > v.viewport.Height {
+		// Prioritize the new-message boundary and author when the whole
+		// message cannot fit. PgDn can reveal the rest of a long message.
+		v.viewport.SetYOffset(start)
+		return
 	}
 	if end > v.viewport.YOffset+v.viewport.Height {
 		v.viewport.SetYOffset(max(start, end-v.viewport.Height))
@@ -577,7 +593,7 @@ func (m *model) merge(v *view, incoming []core.Message, initial, older bool) {
 	}
 	m.rebuild(v, false)
 	if initial {
-		v.viewport.GotoBottom()
+		m.positionInitial(v)
 	} else if v.selected < len(v.starts) {
 		v.viewport.SetYOffset(max(0, v.starts[v.selected]+oldOffset-oldSelectedStart))
 	}
@@ -1260,9 +1276,13 @@ func separator(width int) string {
 }
 
 func todaySeparator(width int) string {
-	label := fit(" Today ", width)
+	return muted.Render(labeledSeparator("Today", width))
+}
+
+func labeledSeparator(text string, width int) string {
+	label := fit(" "+text+" ", width)
 	padding := max(0, width-ansi.StringWidth(label))
-	return accent.Bold(true).Render(strings.Repeat("─", padding/2) + label + strings.Repeat("─", padding-padding/2))
+	return strings.Repeat("─", padding/2) + label + strings.Repeat("─", padding-padding/2)
 }
 
 func sidebarHeading(section string, width int) string {

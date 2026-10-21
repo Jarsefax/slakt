@@ -82,10 +82,10 @@ func (m *model) syncPreview() tea.Cmd {
 			// changing its messages, selection, or scroll position.
 			m.previewGeneration++
 			m.previewAfter = after
-			m.preview = &view{conversation: c, messages: messagesAfter(m.main.messages, after), loading: m.main.loading, generation: m.previewGeneration, viewport: viewport.New(60, 15)}
+			m.preview = &view{conversation: c, newAfter: after, messages: messagesAfter(m.main.messages, after), loading: m.main.loading, generation: m.previewGeneration, viewport: viewport.New(60, 15)}
 			m.preview.selected = max(0, len(m.preview.messages)-1)
 			m.rebuild(m.preview, false)
-			m.preview.viewport.GotoBottom()
+			m.positionInitial(m.preview)
 		}
 		return nil
 	}
@@ -96,7 +96,7 @@ func (m *model) syncPreview() tea.Cmd {
 	m.previewGeneration++
 	generation := m.previewGeneration
 	m.previewAfter = after
-	m.preview = &view{conversation: c, loading: true, generation: generation, viewport: viewport.New(60, 15)}
+	m.preview = &view{conversation: c, newAfter: m.readState.Position(c.ID), loading: true, generation: generation, viewport: viewport.New(60, 15)}
 	m.rebuild(m.preview, false)
 	ctx, cancel := context.WithTimeout(m.ctx, 2*time.Minute)
 	m.previewCancel = cancel

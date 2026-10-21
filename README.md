@@ -219,6 +219,16 @@ hidden by help, search, or a narrow thread view remain unread until you return
 to the timeline. Opening a conversation treats its loaded history as read,
 without requiring you to scroll through each message.
 
+A bright **New messages** divider separates older history from messages newer
+than the local read position captured when you opened the conversation or its
+sidebar preview. The view opens at the first new message in the loaded history,
+with a little older context above it when space permits. The divider stays at
+that boundary for the visit, including after automatic read marking, refreshes,
+and resizing. New arrivals appear below the same boundary. Opening the
+conversation again captures a fresh read position; a fully read conversation
+opens at its latest message. Use `n` to load earlier history when needed.
+Thread-only replies and search results have no local unread boundary.
+
 Unread tracking belongs to slkt and does not read or change Slack's read markers.
 Existing history starts read when tracking is first enabled for an account;
 messages arriving after that baseline, including while slkt is closed, can be
@@ -280,11 +290,12 @@ settings, hidden choices, and read positions in memory and does not touch these 
 
 ## TUI keys
 
-A bold **Today** separator marks the first loaded message from the current local
-calendar day in conversations, threads, and search. Each current-day message also
-shows **Today HH:MM** in its timestamp, including in conversation previews and CLI
-output. Older messages show **Mon DD HH:MM**. The TUI labels refresh when the local
-day changes.
+A muted **Today** separator marks the first loaded message from the current local
+calendar day in conversations, threads, and search. When it coincides with the
+**New messages** boundary, only the bright **New messages** divider appears.
+Each current-day message also shows **Today HH:MM** in its timestamp, including
+in conversation previews and CLI output. Older messages show **Mon DD HH:MM**.
+The TUI labels refresh when the local day changes.
 
 | Key | Action |
 | --- | --- |
