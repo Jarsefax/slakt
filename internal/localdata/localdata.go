@@ -70,6 +70,7 @@ type Config struct {
 	SidebarMode         SidebarMode                `json:"sidebar_mode"`
 	MessageOpenTarget   MessageOpenTarget          `json:"message_open_target"`
 	HiddenConversations map[string]map[string]bool `json:"hidden_conversations,omitempty"`
+	LastConversations   map[string]string          `json:"last_conversations,omitempty"`
 }
 
 // StartedAt establishes a baseline once per account, including conversations
@@ -235,6 +236,28 @@ func (s *Store) LoadHiddenConversations(team, user string) (map[string]bool, err
 		hidden = map[string]bool{}
 	}
 	return hidden, nil
+}
+
+// Save only the account being changed. Read-state saves and sidebar previews
+// must not overwrite the last conversation explicitly opened in another session.
+func (s *Store) SaveLastConversation(ctx context.Context, team, user, channel string) error {
+	if team == "" || user == "" || channel == "" {
+		return errors.New("missing account or last conversation")
+	}
+	return s.saveConfig(ctx, func(config map[string]json.RawMessage) error {
+		accounts := map[string]string{}
+		if raw, ok := config["last_conversations"]; ok {
+			if err := json.Unmarshal(raw, &accounts); err != nil {
+				return fmt.Errorf("read last conversations in %s: %w", s.ConfigPath, err)
+			}
+		}
+		if accounts == nil {
+			accounts = map[string]string{}
+		}
+		accounts[team+"/"+user] = channel
+		config["last_conversations"], _ = json.Marshal(accounts)
+		return nil
+	})
 }
 
 // Save only changed IDs so stale sessions cannot replace another session's

@@ -22,7 +22,7 @@ func (m model) isUnread(channel string) bool {
 }
 
 func (m model) readingMain() bool {
-	return m.main.conversation.ID != "" && !m.main.loading && !m.sidebar && !m.searchActive && !m.help &&
+	return m.main.conversation.ID != "" && !m.main.startup && !m.main.loading && !m.sidebar && !m.searchActive && !m.help &&
 		(m.thread == nil || m.width >= 125) && m.width >= 40 && m.height >= 15
 }
 
@@ -121,6 +121,9 @@ func (m *model) markSidebarRead() {
 		return
 	}
 	m.sidebarReadID = c.ID
+	if c.ID == m.main.conversation.ID {
+		m.main.startup = false
+	}
 	m.markReadThrough(c.ID, max(m.latest[c.ID], newestTimestamp(v.messages)))
 	m.status = "Marked " + c.Label() + " read"
 }
@@ -184,9 +187,13 @@ func (m *model) markReadThrough(channel, latest string) {
 	m.persistLocal()
 }
 
+func (m model) localDirty() bool {
+	return m.configDirty || m.conversationDirty || m.readDirty || len(m.hiddenDirty) > 0
+}
+
 func (m *model) persistLocal() {
 	if m.options.Store == nil {
-		m.configDirty, m.readDirty = false, false
+		m.configDirty, m.conversationDirty, m.readDirty = false, false, false
 		m.hiddenDirty = nil
 		return
 	}
@@ -207,6 +214,13 @@ func (m *model) persistLocal() {
 			return
 		}
 		m.hiddenDirty = nil
+	}
+	if m.conversationDirty {
+		if err := m.options.Store.SaveLastConversation(ctx, m.identity.TeamID, m.identity.UserID, m.lastConversation); err != nil {
+			m.storageError = "Cannot save last conversation: " + err.Error()
+			return
+		}
+		m.conversationDirty = false
 	}
 	if m.readDirty {
 		state := m.readState

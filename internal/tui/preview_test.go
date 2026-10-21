@@ -23,7 +23,8 @@ func TestSidebarPreviewKeepsUnreadStateUntilExplicitlyOpened(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			m := loadedModel(t)
 			m.sidebarMode = mode
-			store := &localdata.Store{StatePath: filepath.Join(t.TempDir(), "read-state.json")}
+			root := t.TempDir()
+			store := &localdata.Store{ConfigPath: filepath.Join(root, "config.json"), StatePath: filepath.Join(root, "read-state.json")}
 			m.options.Store = store
 			if err := store.SaveReadState(m.ctx, m.identity.TeamID, m.identity.UserID, m.readState); err != nil {
 				t.Fatal(err)

@@ -134,17 +134,21 @@ func TestHideInAllKeepsRowAndRejectsTextInput(t *testing.T) {
 }
 
 func TestHiddenConversationsLoadOnStartupWithoutOpeningHiddenByDefault(t *testing.T) {
-	store := &localdata.Store{ConfigPath: filepath.Join(t.TempDir(), "config.json"), StatePath: filepath.Join(t.TempDir(), "read-state.json")}
 	service := core.New(demo.New())
 	ctx := context.Background()
 	identity, _ := service.Backend.Identity(ctx)
 	conversations, _, _ := service.Directory(ctx, true)
 	first := conversations[0]
-	if err := store.SaveHiddenConversations(ctx, identity.TeamID, identity.UserID, map[string]bool{first.ID: true}); err != nil {
-		t.Fatal(err)
+	newStore := func() *localdata.Store {
+		root := t.TempDir()
+		store := &localdata.Store{ConfigPath: filepath.Join(root, "config.json"), StatePath: filepath.Join(root, "read-state.json")}
+		if err := store.SaveHiddenConversations(ctx, identity.TeamID, identity.UserID, map[string]bool{first.ID: true}); err != nil {
+			t.Fatal(err)
+		}
+		return store
 	}
 	for _, mode := range []localdata.SidebarMode{localdata.Visible, localdata.UnreadFirst, localdata.UnreadOnly, localdata.Hidden, localdata.All} {
-		m := newModel(ctx, service, Options{Store: store, PollInterval: 15 * time.Second})
+		m := newModel(ctx, service, Options{Store: newStore(), PollInterval: 15 * time.Second})
 		m.sidebarMode = mode
 		updated, cmd := m.Update(m.directoryCmd()())
 		m = updated.(model)
@@ -156,7 +160,7 @@ func TestHiddenConversationsLoadOnStartupWithoutOpeningHiddenByDefault(t *testin
 			t.Fatalf("startup in %s opened %s, want %s; hidden=%v", mode, m.main.conversation.ID, want, m.hidden)
 		}
 	}
-	m := newModel(ctx, service, Options{Store: store, Initial: &first})
+	m := newModel(ctx, service, Options{Store: newStore(), Initial: &first})
 	updated, cmd := m.Update(m.directoryCmd()())
 	m = updated.(model)
 	if cmd == nil || m.main.conversation.ID != first.ID || !m.hidden[first.ID] {

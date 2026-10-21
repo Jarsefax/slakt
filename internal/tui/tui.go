@@ -54,6 +54,7 @@ type view struct {
 	hasMore      bool
 	loading      bool
 	generation   int
+	startup      bool // Startup alone cannot mark this conversation read.
 }
 
 type model struct {
@@ -101,15 +102,18 @@ type model struct {
 	unreadError                          string
 	storageError                         string
 	configDirty, readDirty               bool
+	lastConversation                     string
+	conversationDirty                    bool
 }
 
 type directoryResult struct {
-	identity      core.Identity
-	conversations []core.Conversation
-	users         []core.User
-	err           error
-	readState     localdata.ReadState
-	hidden        map[string]bool
+	identity         core.Identity
+	conversations    []core.Conversation
+	users            []core.User
+	err              error
+	readState        localdata.ReadState
+	hidden           map[string]bool
+	lastConversation string
 }
 type messagesResult struct {
 	channel, thread string
@@ -179,7 +183,7 @@ func Run(ctx context.Context, service *core.Service, opts Options) error {
 	finished, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
 	if final, ok := finished.(model); ok {
 		final.clearPreview()
-		if final.configDirty || final.readDirty || len(final.hiddenDirty) > 0 {
+		if final.localDirty() {
 			final.persistLocal()
 			if err == nil && final.storageError != "" {
 				err = fmt.Errorf("%s", final.storageError)
@@ -254,13 +258,17 @@ func (m model) directoryCmd() tea.Cmd {
 		conversations, users, err := m.service.Directory(ctx, true)
 		state := m.readState
 		hidden := m.hidden
+		last := m.lastConversation
 		if err == nil && m.options.Store != nil {
 			state, err = m.options.Store.LoadReadState(ctx, id.TeamID, id.UserID)
 			if err == nil {
-				hidden, err = m.options.Store.LoadHiddenConversations(id.TeamID, id.UserID)
+				var config localdata.Config
+				config, err = m.options.Store.LoadConfig()
+				hidden = config.HiddenConversations[id.TeamID+"/"+id.UserID]
+				last = config.LastConversations[id.TeamID+"/"+id.UserID]
 			}
 		}
-		return directoryResult{identity: id, conversations: conversations, users: users, err: err, readState: state, hidden: hidden}
+		return directoryResult{identity: id, conversations: conversations, users: users, err: err, readState: state, hidden: hidden, lastConversation: last}
 	}
 }
 
@@ -307,10 +315,22 @@ func (m *model) switchTo(c core.Conversation) tea.Cmd {
 	m.sidebar = false
 	m.clearPreview()
 	m.main = view{conversation: c, newAfter: m.readState.Position(c.ID), loading: true, generation: m.main.generation + 1, viewport: viewport.New(60, 15)}
+	m.lastConversation = c.ID
+	m.conversationDirty = true
 	m.selectSidebar(c.ID)
 	m.restoreDraft()
 	m.status = "Loading " + c.Label() + "…"
 	return m.loadCmd(m.main, false)
+}
+
+func (m *model) switchToStartup(c core.Conversation) tea.Cmd {
+	// Restoring an existing preference is not a new choice. Explicitly opening
+	// even the same conversation is, including when another session chose one.
+	dirty := m.conversationDirty || m.lastConversation != c.ID
+	cmd := m.switchTo(c)
+	m.conversationDirty = dirty
+	m.main.startup = true
+	return cmd
 }
 
 func (m model) loadCmd(v view, more bool) tea.Cmd {
@@ -622,9 +642,9 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	if next.readingMain() {
 		next.markRead(next.main.conversation.ID, next.main.messages)
 	}
-	// Latest-message observations also need saving while another pane is
-	// focused and the main conversation cannot be marked read.
-	if next.readDirty {
+	// Observations and UI choices also need saving when automatic read marking
+	// is paused, including for a conversation opened by startup.
+	if next.localDirty() {
 		next.persistLocal()
 	}
 	// Focus and the local date can change while panes are cached. Preserve
@@ -668,6 +688,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.identity, m.conversations, m.users = msg.identity, msg.conversations, msg.users
 		m.hidden = msg.hidden
+		m.lastConversation = msg.lastConversation
 		if msg.readState.StartedAt != "" {
 			m.readState = msg.readState
 			m.latest = msg.readState.Latest
@@ -679,14 +700,19 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.names[u.ID] = u.PreferredName()
 		}
 		if m.options.Initial != nil {
-			return m, m.switchTo(*m.options.Initial)
+			return m, m.switchToStartup(*m.options.Initial)
+		}
+		for _, c := range m.conversations {
+			if c.ID == m.lastConversation {
+				return m, m.switchToStartup(c)
+			}
 		}
 		initial := m
 		if initial.sidebarMode == localdata.UnreadOnly {
 			initial.sidebarMode = localdata.Visible
 		}
 		if items := initial.sidebarConversations(); len(items) > 0 {
-			return m, m.switchTo(items[0])
+			return m, m.switchToStartup(items[0])
 		}
 		m.status = "No conversations in this mode. m to change mode · Ctrl+k to jump."
 	case messagesResult:
@@ -1414,6 +1440,7 @@ func pane(v view, width, height int, label string) string {
 
 func helpLines(width int) []string {
 	text := "Keyboard guide\n\nCtrl+k    Jump to a channel/person\nTab       Conversation sidebar\nm         Cycle sidebar mode outside text entry\nj/k ↑/↓   Select a message\nPgUp/Dn   Scroll long messages\nEnter     Open/start thread\ni         Compose a message\nEnter     Newline while composing\nCtrl+s    Send draft, then browse\nEsc       Keep draft / go back\nCtrl+e    External editor in composer\n/         Search Slack\nr         Mark sidebar conversation read / add a reaction\nh         Hide/unhide highlighted sidebar conversation\no         Open message (configured target)\nn         Next history/search page\nR         Reload conversation\nq         Quit outside text entry\nCtrl+c    Quit anywhere\nEsc q     Leave text entry and quit\n\nText entry: i, /, Ctrl+k; r outside the sidebar.\nSelected message: position starting at 1.\nOther numbers: distance from selection.\n↳ Thread: this message has replies.\n● Conversation: unread in slkt.\nSidebar modes: Visible / Unread first / Unread only / Hidden / All.\nVisible and unread modes exclude hidden conversations.\nHidden shows only hidden conversations; All includes everything.\n× Conversation: hidden in slkt. h in the sidebar toggles hiding.\nCtrl+k and search still find hidden conversations.\nSidebar arrows/j/k preview without marking read.\nr marks the highlighted conversation read.\nIts preview stays; Unread only keeps its row until you move away.\nEnter opens; Tab/Esc returns to the original view.\nIn Unread only, the open conversation stays listed unless hidden.\n\nUpdates use polling. Drafts live only in this process."
+	text += "\nStartup restores the last open conversation without marking read.\nReopen via sidebar Enter/Ctrl+k, or mark read with sidebar r."
 	return strings.Split(ansi.Wrap(text, max(20, width-2), ""), "\n")
 }
 

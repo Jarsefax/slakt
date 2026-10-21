@@ -179,8 +179,8 @@ Press `m` outside text entry to cycle the conversation sidebar mode, from any pa
   first within each section. Each unread/read group remains alphabetical.
 - **Unread only** shows non-hidden unread conversations and the currently open
   conversation, unless it is hidden.
-  Opening a conversation marks it read locally after history loads successfully;
-  its row stays visible until you switch away. Empty sections are hidden.
+  Explicitly opening a conversation marks it read locally after history loads
+  successfully; its row stays visible until you switch away. Empty sections are hidden.
 - **Hidden** shows only hidden conversations, so they are easy to unhide.
 - **All** keeps every conversation, including hidden ones, in its usual
   alphabetical order. Hidden conversations have a **×** marker.
@@ -216,8 +216,17 @@ Messages in an open conversation are marked read as they arrive while browsing
 its timeline. Read tracking pauses while the conversation sidebar has focus,
 including during background refreshes. Messages received while its timeline is
 hidden by help, search, or a narrow thread view remain unread until you return
-to the timeline. Opening a conversation treats its loaded history as read,
-without requiring you to scroll through each message.
+to the timeline. Explicitly opening a conversation treats its loaded history as
+read, without requiring you to scroll through each message.
+
+Startup restores the last opened conversation for the current workspace and
+account, using its ID so renames and sidebar sorting do not change the selection.
+An explicitly requested startup conversation takes priority; if no saved
+conversation is available, slkt opens the first eligible conversation.
+Any conversation opened by startup keeps its unread state, including through
+polling, reloading, resizing, and pane changes. To resume normal read marking,
+deliberately reopen it with sidebar `Enter` or `Ctrl+k`, or mark it read with
+sidebar `r`. Previewing other conversations does not change the saved selection.
 
 A bright **New messages** divider separates older history from messages newer
 than the local read position captured when you opened the conversation or its
@@ -283,6 +292,12 @@ Hidden conversation IDs are saved immediately in the UI configuration under
 to `true`. Choices survive restarts and conversation renames. Concurrent sessions
 merge changes to different conversation IDs; the latest save wins for the same
 ID. Hiding and unhiding preserve other settings and read positions.
+
+The last opened conversation ID is saved in the UI configuration under
+`"last_conversations"`, keyed by `"TEAM_ID/USER_ID"`. Only opening a conversation
+changes that preference; background checks and previews preserve it. Concurrent
+sessions preserve other accounts' selections; the latest open saved for the same
+account wins.
 
 Read positions are scoped by workspace and account and saved when messages are read.
 Files contain IDs, timestamps, and settings, with no message text or credentials.

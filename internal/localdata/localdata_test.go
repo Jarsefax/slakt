@@ -350,7 +350,7 @@ func TestConcurrentHiddenConversationSavesPreserveOtherSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
-	errs := make(chan error, 10)
+	errs := make(chan error, 12)
 	for i := range 8 {
 		wg.Go(func() {
 			errs <- store.SaveHiddenConversations(ctx, "T1", "U1", map[string]bool{string(rune('A' + i)): true, "OLD": false})
@@ -358,6 +358,8 @@ func TestConcurrentHiddenConversationSavesPreserveOtherSettings(t *testing.T) {
 	}
 	wg.Go(func() { errs <- store.SaveMode(ctx, UnreadOnly) })
 	wg.Go(func() { errs <- store.SaveMessageOpenTarget(ctx, Browser) })
+	wg.Go(func() { errs <- store.SaveLastConversation(ctx, "T1", "U1", "C1") })
+	wg.Go(func() { errs <- store.SaveLastConversation(ctx, "T2", "U1", "D1") })
 	wg.Wait()
 	close(errs)
 	for err := range errs {
@@ -366,8 +368,62 @@ func TestConcurrentHiddenConversationSavesPreserveOtherSettings(t *testing.T) {
 		}
 	}
 	config, err := store.LoadConfig()
-	if err != nil || config.SidebarMode != UnreadOnly || config.MessageOpenTarget != Browser || len(config.HiddenConversations["T1/U1"]) != 8 || config.HiddenConversations["T1/U1"]["OLD"] {
+	if err != nil || config.SidebarMode != UnreadOnly || config.MessageOpenTarget != Browser || len(config.HiddenConversations["T1/U1"]) != 8 || config.HiddenConversations["T1/U1"]["OLD"] || config.LastConversations["T1/U1"] != "C1" || config.LastConversations["T2/U1"] != "D1" {
 		t.Fatalf("concurrent saves lost choices: %+v, %v", config, err)
+	}
+}
+
+func TestLastConversationsPersistPerAccountWithoutChangingOtherSettings(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	if err := store.SaveHiddenConversations(ctx, "T1", "U1", map[string]bool{"C1": true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []struct{ team, user, channel string }{
+		{"T1", "U1", "C1"},
+		{"T2", "U1", "C2"},
+		{"T1", "U2", "D1"},
+		{"T1", "U1", "C3"},
+	} {
+		if err := store.SaveLastConversation(ctx, change.team, change.user, change.channel); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.SaveMode(ctx, UnreadFirst); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveMessageOpenTarget(ctx, Browser); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveReadState(ctx, "T1", "U1", NewReadState(time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	restarted := &Store{ConfigPath: store.ConfigPath, StatePath: store.StatePath}
+	config, err := restarted.LoadConfig()
+	want := map[string]string{"T1/U1": "C3", "T2/U1": "C2", "T1/U2": "D1"}
+	if err != nil || !reflect.DeepEqual(config.LastConversations, want) || !config.HiddenConversations["T1/U1"]["C1"] || config.SidebarMode != UnreadFirst || config.MessageOpenTarget != Browser {
+		t.Fatalf("last conversations or other configuration lost: %+v, %v", config, err)
+	}
+}
+
+func TestInvalidLastConversationsAreReportedAndPreserved(t *testing.T) {
+	store := testStore(t)
+	if err := os.MkdirAll(filepath.Dir(store.ConfigPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	content := `{"last_conversations":{"T1/U1":42},"future_setting":true}`
+	if err := os.WriteFile(store.ConfigPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadConfig(); err == nil {
+		t.Fatal("invalid last conversations loaded")
+	}
+	if err := store.SaveLastConversation(context.Background(), "T1", "U1", "C1"); err == nil {
+		t.Fatal("invalid last conversations overwritten")
+	}
+	data, err := os.ReadFile(store.ConfigPath)
+	if err != nil || string(data) != content {
+		t.Fatalf("invalid configuration changed: %s, %v", data, err)
 	}
 }
 

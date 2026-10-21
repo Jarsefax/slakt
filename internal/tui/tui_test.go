@@ -18,8 +18,12 @@ func loadedModel(t *testing.T) model {
 	t.Helper()
 	s := core.New(demo.New())
 	m := newModel(context.Background(), s, Options{PollInterval: 15 * time.Second, Demo: true})
-	mm, cmd := m.Update(m.directoryCmd()())
+	mm, _ := m.Update(m.directoryCmd()())
 	m = mm.(model)
+	// Most tests exercise normal browsing after a deliberate open. Startup's
+	// read exemption is covered separately in unread_restart_test.go.
+	m, _ = key(m, "tab")
+	m, cmd := key(m, "enter")
 	if cmd == nil {
 		t.Fatal("no initial history request")
 	}
