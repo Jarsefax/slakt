@@ -238,7 +238,20 @@ func TestHelpPanelIsOpaqueAndOnlyTheWorkspaceIsDimmed(t *testing.T) {
 		t.Fatal("the workspace behind help is not dimmed")
 	}
 	width, rows := m.helpSize()
-	x, y := (m.width-width)/2, (m.height-rows-6)/2
+	// Locate the actual panel: the diagnostics footer can move browsing help
+	// upward to keep the application version visible.
+	x, y := -1, -1
+	for row := 0; row < m.height && x < 0; row++ {
+		for col := 0; col < m.width; col++ {
+			if c := buffer.Cell(col, row); c != nil && c.Rune == '╭' {
+				x, y = col, row
+				break
+			}
+		}
+	}
+	if x < 0 {
+		t.Fatal("help panel border missing")
+	}
 	background := buffer.Cell(x+1, y+1).Style.Bg
 	if background == nil {
 		t.Fatal("the modal has no background")

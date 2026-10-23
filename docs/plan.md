@@ -83,7 +83,9 @@ performed while implementing this version.
   colleague; solve routing before multi-client event support. Never bundle a
   shared app-level token in binaries.
 - Exact unread counts, synchronization of Slack read positions, deletion events,
-  older/thread edit parity, and background notifications.
+  older/thread edit parity, and notifications while slkt is closed. The running
+  Linux TUI supports desktop notifications for non-hidden conversations through
+  its existing polling; unopened threads are not monitored.
 - Durable drafts, persistent bounded cache, remote/headless login, multi-account
   selection, calls, canvases, workflow interaction, and file uploads.
 - Additional architectures and Windows/macOS releases. Cross-compilation is only

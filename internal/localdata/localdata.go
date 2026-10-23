@@ -66,9 +66,20 @@ const (
 
 func (t MessageOpenTarget) Valid() bool { return t == Desktop || t == Browser }
 
+type Notifications string
+
+const (
+	NotificationsOn  Notifications = "on"
+	NotificationsOff Notifications = "off"
+)
+
+func (n Notifications) Valid() bool { return n == NotificationsOn || n == NotificationsOff }
+
 type Config struct {
 	SidebarMode         SidebarMode                `json:"sidebar_mode"`
 	MessageOpenTarget   MessageOpenTarget          `json:"message_open_target"`
+	Notifications       Notifications              `json:"notifications"`
+	NotificationStatus  Notifications              `json:"notification_status"`
 	HiddenConversations map[string]map[string]bool `json:"hidden_conversations,omitempty"`
 	LastConversations   map[string]string          `json:"last_conversations,omitempty"`
 }
@@ -125,7 +136,7 @@ func readJSON(path string, value any) error {
 }
 
 func (s *Store) LoadConfig() (Config, error) {
-	config := Config{SidebarMode: Visible, MessageOpenTarget: Desktop}
+	config := Config{SidebarMode: Visible, MessageOpenTarget: Desktop, Notifications: NotificationsOn, NotificationStatus: NotificationsOn}
 	if err := readJSON(s.ConfigPath, &config); err != nil {
 		return config, err
 	}
@@ -137,6 +148,12 @@ func (s *Store) LoadConfig() (Config, error) {
 	}
 	if !config.MessageOpenTarget.Valid() {
 		return config, fmt.Errorf("invalid message_open_target %q in %s (use desktop or browser)", config.MessageOpenTarget, s.ConfigPath)
+	}
+	if !config.Notifications.Valid() {
+		return config, fmt.Errorf("invalid notifications %q in %s (use on or off)", config.Notifications, s.ConfigPath)
+	}
+	if !config.NotificationStatus.Valid() {
+		return config, fmt.Errorf("invalid notification_status %q in %s (use on or off)", config.NotificationStatus, s.ConfigPath)
 	}
 	return config, nil
 }
@@ -201,6 +218,20 @@ func (s *Store) SaveMessageOpenTarget(ctx context.Context, target MessageOpenTar
 		return fmt.Errorf("invalid message_open_target %q (use desktop or browser)", target)
 	}
 	return s.saveSetting(ctx, "message_open_target", string(target))
+}
+
+func (s *Store) SaveNotifications(ctx context.Context, value Notifications) error {
+	if !value.Valid() {
+		return fmt.Errorf("invalid notifications %q (use on or off)", value)
+	}
+	return s.saveSetting(ctx, "notifications", string(value))
+}
+
+func (s *Store) SaveNotificationStatus(ctx context.Context, value Notifications) error {
+	if !value.Valid() {
+		return fmt.Errorf("invalid notification_status %q (use on or off)", value)
+	}
+	return s.saveSetting(ctx, "notification_status", string(value))
 }
 
 func (s *Store) saveSetting(ctx context.Context, key, value string) error {

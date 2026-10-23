@@ -193,8 +193,9 @@ Press `h` with the sidebar focused to hide or unhide the highlighted channel,
 DM, or group DM. Hiding removes it from **Visible** and both unread modes;
 **Hidden** and **All** keep it accessible. A disappearing row selects its next
 neighbor, or the previous row at the end of the list. The open conversation,
-thread, and drafts stay intact. Hiding preserves read positions and does not
-change Slack settings or notifications. `Ctrl+k` and Slack search still find
+thread, and drafts stay intact. Hiding preserves read positions and silences
+slkt's desktop notifications for that conversation. Slack's own settings are
+unchanged. `Ctrl+k` and Slack search still find
 hidden conversations; opening one does not unhide it. Existing saved modes stay
 selected after upgrading.
 
@@ -278,7 +279,9 @@ The `"message_open_target"` setting controls where `o` opens the selected messag
 ```json
 {
   "sidebar_mode": "visible",
-  "message_open_target": "desktop"
+  "message_open_target": "desktop",
+  "notifications": "on",
+  "notification_status": "on"
 }
 ```
 
@@ -299,6 +302,68 @@ You can also edit the configuration file directly. Each key
 press opens only the chosen target; a launch failure is reported in the TUI.
 Invalid target values are reported on startup. Cycling the sidebar mode preserves
 the message target.
+
+Desktop notifications default to `"notifications": "on"`. Use
+`slkt config set notifications off` to disable them, or
+`slkt config set notifications on` to enable them, then restart slkt.
+`slkt config get notifications` prints the effective setting; both commands
+support `--json` and preserve other settings.
+
+The TUI shows a persistent `notify: tried 3 · sent 2 · failed 1` row above the
+poll countdown. **Tried** counts delivery attempts dispatched by slkt, including
+those still in flight; **sent** counts attempts accepted by the desktop service;
+**failed** counts attempts that returned an error. Desktop acceptance does not
+guarantee a visible popup. The latest failure reason remains available after
+later successes, appearing in the status area and, when space permits, beside
+the counters. Large counters use compact `t`/`s`/`f` labels on narrow terminals.
+Counts and the latest failure reset when the TUI starts. Disabled desktop
+notifications show `notify: off`; demo mode shows `notify: off (demo)`.
+
+The counter row defaults to `"notification_status": "on"`. Hide or restore it
+with `slkt config set notification_status off` or
+`slkt config set notification_status on`, then restart slkt.
+`slkt config get notification_status` prints the effective value; both commands
+support `--json`. This setting only controls the row's visibility; it preserves
+the independent `notifications` setting and does not change desktop delivery.
+
+With `notification_status` enabled, the counter row also shows the current
+conversation's last message decision and its source (`background`, `poll`,
+`preview`, or `history`). Reasons include `queued`, `before startup`,
+`already examined`, `own message`, `hidden`, and `unknown conversation`.
+Search results and history pagination report that those paths bypass alerts;
+empty checks and fetch failures are also recorded. Narrow rows shorten the
+counter labels to keep the decision reason visible.
+
+Open or highlight the affected DM, press `?` (or `F1`), and scroll to
+**Notification decision** for the full message timestamp, startup cutoff,
+previously examined cutoff, effective cutoff, and decision time. Times include
+UTC labels and the raw Slack timestamps for exact comparisons. The latest
+check is shown separately, so an empty check or older history page does not
+erase a newer message's evidence. Repeated checks retain its first decision
+reason as well. Details follow the conversation you are viewing or previewing;
+background checks in other conversations do not replace them. Diagnostics stay
+in memory for the session and contain metadata, without message bodies.
+
+On Linux, while the TUI is running, new messages in non-hidden conversations
+produce native desktop notifications with the conversation, sender, and a short
+message preview. Titles start with `Slakt` and the running version's
+`major.minor.patch`, omitting development and build metadata, so they are easy
+to distinguish from the official Slack client. This uses the session D-Bus
+notification service directly; no
+`notify-send` installation is needed. The desktop's notification and Do Not
+Disturb settings determine presentation. A missing service is reported in the
+TUI without interrupting polling. Demo mode never sends desktop notifications.
+
+Notifications use the existing polling schedule, including when the terminal
+is in the background. All non-hidden conversations remain eligible regardless
+of sidebar mode. Each successful check announces at most the newest incoming
+message it finds; repeated polls, edits, reactions, your own messages, and
+history from before this launch stay silent. Unhiding resumes alerts for future
+arrivals. The one-item inactive checks can coalesce activity or miss intervening
+messages, for example when the newest message is your own. Replies in an open
+thread can notify; unopened threads are not monitored. Notifications stop when
+slkt exits, and do not change local or Slack read positions. Multiple running
+sessions can each produce notifications.
 
 Hidden conversation IDs are saved immediately in the UI configuration under
 `"hidden_conversations"`, scoped by `"TEAM_ID/USER_ID"`, with each hidden ID set
@@ -424,13 +489,16 @@ expansion. Unsaved drafts do not survive process exit or a crash.
   Scrolling the sidebar does not affect eligibility. Mode and hide/unhide changes
   apply to the next check; a request already running may finish. The open
   conversation and thread keep their separate refresh, even when hidden.
+  With desktop notifications enabled, non-hidden conversations are also checked
+  in **Hidden** mode so browsing hidden conversations does not pause alerts.
 - Reads honor Slack's `Retry-After`, retry transient failures up to three times,
   and support cancellation. Refresh resumes automatically after disconnection.
   Gap recovery walks pages back to the previously newest message. Selection and
   scroll position stay anchored; the cache holds at most 500 messages per view.
 - Recent channel messages are refreshed for edits/reactions. Deleted cached
   messages and edits to older/thread replies may remain until reload. There are
-  no exact unread counts, Slack read-position synchronization, or background alerts.
+  no exact unread counts or Slack read-position synchronization. Desktop alerts
+  are limited to messages detected by the running TUI's polling.
 - Failed refreshes keep the current view. Polling catches up when connectivity
   returns; recovering very large gaps is limited to 100 pages per refresh.
 - Writes are never automatically retried. If a send's outcome is unknown, check

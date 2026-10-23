@@ -161,10 +161,22 @@ func (m model) helpContent(width int) (string, []string) {
 	}
 
 	if m.mode == "" {
+		if m.showNotificationStatus() {
+			section("Notification decision")
+			for _, line := range m.notificationDetails() {
+				text(line)
+			}
+		}
 		section("Reading the workspace")
 		text("● unread conversation · × hidden conversation")
 		text("↳ Thread means a message has replies. The selected message shows its position; other numbers show distance from it.")
 		text("The poll countdown names the open conversation (+ thread when open), not the sidebar preview. Its interval starts after each refresh; unread checks run separately.")
+		if m.notificationsEnabled() {
+			text("Desktop notifications announce new messages in non-hidden conversations while slkt runs. Hide a conversation to silence it; slkt config set notifications off disables alerts after restart.")
+		}
+		if m.showNotificationStatus() {
+			text("notify: tried counts delivery attempts, sent means accepted by the desktop service, and failed counts errors. The row also shows the current conversation's last message decision; its timestamps and cutoffs appear under Notification decision above. Counts reset on launch; the latest failure stays available. slkt config set notification_status off hides these diagnostics after restart without disabling alerts.")
+		}
 		if m.sidebar {
 			text("Previews do not mark conversations read. In Unread only, marking a row read keeps its preview until you move away.")
 			text("Modes: Visible / Unread first / Unread only / Hidden / All. Visible and unread modes exclude hidden conversations; Ctrl+k and search can still find them.")
@@ -223,6 +235,12 @@ func (m model) helpOverlay(frame string) string {
 		Foreground(lipgloss.Color("#E8EDF7")).Background(lipgloss.Color("#151C2D")).Render(content)
 	panelWidth, panelHeight := lipgloss.Size(panel)
 	x, y := (m.width-panelWidth)/2, (m.height-panelHeight)/2
+	if m.showNotificationStatus() && m.mode == "" {
+		// The additional diagnostic row moves branding upward. Keep its
+		// separator and version visible when the browsing modal has room.
+		footerStart := m.height - 4 - lipgloss.Height(m.bottomView(m.width))
+		y = max(1, min(y, footerStart-panelHeight-1))
+	}
 	canvas := cellbuf.NewBuffer(m.width, m.height)
 	cellbuf.SetContent(canvas, frame)
 	for row := range m.height {

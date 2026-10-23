@@ -108,6 +108,16 @@ type model struct {
 	configDirty, readDirty               bool
 	lastConversation                     string
 	conversationDirty                    bool
+	notify                               func(context.Context, string, string) error
+	notificationAfter                    string
+	notificationSeen                     map[string]string
+	notificationError                    string
+	notificationStatus                   localdata.Notifications
+	notificationTried                    uint64
+	notificationSent                     uint64
+	notificationFailed                   uint64
+	notificationDecisions                map[string]notificationTrace
+	notificationLastChannel              string
 }
 
 type directoryResult struct {
@@ -181,6 +191,7 @@ func Run(ctx context.Context, service *core.Service, opts Options) error {
 		}
 		m.sidebarMode = config.SidebarMode
 		m.messageOpenTarget = config.MessageOpenTarget
+		m.configureNotifications(config, platform.Notify)
 	} else {
 		m.options.Store = nil
 	}
@@ -426,8 +437,13 @@ func (m *model) dimensions() (int, int, int) {
 	content := max(20, m.width-side-3)
 	// Header and separator, pane caption/separator/count, bottom separator,
 	// and status/poll/unread rows use nine rows outside the message viewport.
+	// The optional notification status uses one additional row.
 	// Reserve input space only while its contents are actually visible.
-	height := max(1, m.height-9-lipgloss.Height(m.bottomView(content)))
+	statusRows := 9
+	if m.showNotificationStatus() {
+		statusRows++
+	}
+	height := max(1, m.height-statusRows-lipgloss.Height(m.bottomView(content)))
 	return side, content, height
 }
 
@@ -645,6 +661,7 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := message.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -670,12 +687,14 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.preview.loading = false
 		if msg.err != nil {
 			m.previewError = msg.err.Error()
+			m.notificationSkipped("preview", msg.channel, nil, "fetch failed")
 			return m, nil
 		}
 		m.names = m.service.UserNames()
 		m.merge(m.preview, messagesAfter(msg.page.Messages, m.previewAfter), true, false)
 		m.preview.cursor, m.preview.hasMore = msg.page.Cursor, msg.page.HasMore
 		m.observeLatest(msg.channel, newestTimestamp(msg.page.Messages))
+		cmd = m.notificationCmd("preview", msg.channel, msg.page.Messages)
 	case directoryResult:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -721,6 +740,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		v.loading = false
 		if msg.err != nil {
 			m.status = msg.err.Error()
+			m.notificationSkipped("history", msg.channel, nil, "fetch failed")
 			return m, nil
 		}
 		m.names = m.service.UserNames()
@@ -730,6 +750,11 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.observeLatest(msg.channel, newestTimestamp(msg.page.Messages))
 		}
 		m.status = "Updated " + time.Now().Format("15:04:05")
+		if !msg.more {
+			cmd = m.notificationCmd("history", msg.channel, msg.page.Messages)
+		} else {
+			m.notificationSkipped("history", msg.channel, msg.page.Messages, "history pagination")
+		}
 	case unreadTickMsg:
 		if m.unreadPolling {
 			return m, nil
@@ -747,11 +772,13 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.unreadCurrent = core.Conversation{}
 		if msg.err != nil {
 			m.unreadError = "Unread check paused: " + msg.err.Error()
+			m.notificationSkipped("background", msg.channel, nil, "fetch failed")
 		} else {
 			m.unreadError = ""
 			m.observeLatest(msg.channel, msg.latest)
+			cmd = m.notificationCmd("background", msg.channel, msg.messages)
 		}
-		return m, m.scheduleUnreadCheck()
+		return m, tea.Batch(cmd, m.scheduleUnreadCheck())
 	case pollCountdownMsg:
 		return m, pollCountdownTick()
 	case tickMsg:
@@ -768,6 +795,12 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.polling = false
 		m.pollCurrent = core.Conversation{}
 		m.pollThread = false
+		if msg.err == nil {
+			incoming := append(append([]core.Message(nil), msg.main...), msg.replies...)
+			cmd = m.notificationCmd("poll", msg.channel, incoming)
+		} else {
+			m.notificationSkipped("poll", msg.channel, nil, "fetch failed")
+		}
 		if msg.channel == m.main.conversation.ID && msg.generation == m.main.generation {
 			if msg.err != nil {
 				m.status = "Refresh paused: " + msg.err.Error()
@@ -782,7 +815,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.nextPoll = time.Now().Add(m.options.PollInterval)
-		return m, m.tick()
+		return m, tea.Batch(cmd, m.tick())
 	case searchResult:
 		if msg.query != m.searchQuery {
 			return m, nil
@@ -794,6 +827,13 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.names = m.service.UserNames()
 		m.search.messages = msg.result.Messages
+		byChannel := map[string][]core.Message{}
+		for _, message := range msg.result.Messages {
+			byChannel[message.ChannelID] = append(byChannel[message.ChannelID], message)
+		}
+		for channel, messages := range byChannel {
+			m.notificationSkipped("search", channel, messages, "search results")
+		}
 		m.search.selected = 0
 		m.searchActive = true
 		m.searchPage, m.searchPages, m.searchTotal = msg.page, msg.result.Pages, msg.result.Total
@@ -852,6 +892,13 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = msg.err.Error()
 		} else {
 			m.status = msg.text
+		}
+	case notificationResult:
+		if msg.err != nil {
+			m.notificationFailed++
+			m.notificationError = "Desktop notification failed: " + msg.err.Error()
+		} else {
+			m.notificationSent++
 		}
 	case reactionResult:
 		if msg.err != nil {
@@ -913,7 +960,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
-	return m, nil
+	return m, cmd
 }
 
 func (m model) enteringText() bool {
@@ -1455,8 +1502,13 @@ func (m model) bottomView(width int) string {
 		if m.mode == "jump" {
 			choices := m.choices(m.input.Value())
 			index := min(m.sideIndex, max(0, len(choices)-1))
-			start := max(0, index-2)
-			for i := start; i < min(len(choices), start+3); i++ {
+			available := m.height - 12 // Keep a message row above the prompt.
+			if m.showNotificationStatus() {
+				available--
+			}
+			choiceRows := min(3, max(0, available))
+			start := max(0, index-choiceRows+1)
+			for i := start; i < min(len(choices), start+choiceRows); i++ {
 				label := "  " + fit(choices[i].label, width-4)
 				if i == index {
 					label = selectedStyle.Render(label)
@@ -1524,6 +1576,9 @@ func (m model) View() string {
 	bottom := m.bottomView(width)
 
 	statusText := m.status
+	if m.notificationError != "" {
+		statusText = m.notificationError
+	}
 	if m.previewError != "" {
 		statusText = "Preview failed: " + m.previewError
 	}
@@ -1535,6 +1590,9 @@ func (m model) View() string {
 	}
 	now := time.Now()
 	status := muted.Render(" " + fit(statusText, m.width-3))
+	if m.showNotificationStatus() {
+		status += "\n" + muted.Render(" "+m.notificationIndicator(m.width-1))
+	}
 	status += "\n" + muted.Render(" "+m.pollIndicator(now))
 	status += "\n" + muted.Render(" "+m.unreadIndicator(now, m.width-1))
 	frame := header + "\n" + separator(m.width) + "\n" + body + "\n" + separator(m.width) + "\n" + bottom + "\n" + status

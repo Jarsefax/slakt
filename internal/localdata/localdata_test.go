@@ -16,6 +16,64 @@ func testStore(t *testing.T) *Store {
 	return &Store{ConfigPath: filepath.Join(root, "config", "config.json"), StatePath: filepath.Join(root, "state", "read-state.json")}
 }
 
+func TestNotificationSettingsValidateAndSurviveOtherSaves(t *testing.T) {
+	s := testStore(t)
+	c, err := s.LoadConfig()
+	if err != nil || c.Notifications != NotificationsOn {
+		t.Fatalf("default notifications = %s, %v", c.Notifications, err)
+	}
+	if err := s.SaveNotifications(context.Background(), NotificationsOff); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMode(context.Background(), Hidden); err != nil {
+		t.Fatal(err)
+	}
+	c, err = s.LoadConfig()
+	if err != nil || c.Notifications != NotificationsOff || c.SidebarMode != Hidden {
+		t.Fatalf("saved notification setting lost: %+v, %v", c, err)
+	}
+	if err := s.SaveNotifications(context.Background(), "yes"); err == nil {
+		t.Fatal("invalid notification setting saved")
+	}
+	if err := os.WriteFile(s.ConfigPath, []byte(`{"notifications":"yes"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LoadConfig(); err == nil {
+		t.Fatal("invalid saved notification setting accepted")
+	}
+}
+
+func TestNotificationStatusSurvivesOtherSavesAndRejectsInvalidSettings(t *testing.T) {
+	s := testStore(t)
+	if err := s.SaveNotificationStatus(context.Background(), NotificationsOff); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveNotifications(context.Background(), NotificationsOn); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMode(context.Background(), Hidden); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.LoadConfig()
+	if err != nil || c.NotificationStatus != NotificationsOff || c.Notifications != NotificationsOn || c.SidebarMode != Hidden {
+		t.Fatalf("display setting overwritten by another save: %+v, %v", c, err)
+	}
+	before, _ := os.ReadFile(s.ConfigPath)
+	if err := s.SaveNotificationStatus(context.Background(), "yes"); err == nil {
+		t.Fatal("invalid display setting saved")
+	}
+	after, _ := os.ReadFile(s.ConfigPath)
+	if string(after) != string(before) {
+		t.Fatal("invalid display setting changed configuration")
+	}
+	if err := os.WriteFile(s.ConfigPath, []byte(`{"notification_status":"yes"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LoadConfig(); err == nil {
+		t.Fatal("invalid persisted display setting loaded")
+	}
+}
+
 func TestDefaultPathsSeparateConfigurationAndState(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))

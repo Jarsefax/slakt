@@ -110,6 +110,13 @@ func TestConfigRejectsInvalidInputWithoutWriting(t *testing.T) {
 		{"config", "set", "unknown", "browser"},
 		{"config", "set", "message_open_target", "both"},
 		{"config", "set", "message_open_target", ""},
+		{"config", "set", "notifications", "yes"},
+		{"config", "set", "notifications", ""},
+		{"config", "set", "notification_status", "yes"},
+		{"config", "set", "notification_status", ""},
+		{"--demo", "config", "get", "notification_status"},
+		{"--demo", "config", "set", "notification_status", "on"},
+		{"--demo", "config", "set", "notifications", "on"},
 		{"config", "unknown"},
 		{"--demo", "config", "get", "message_open_target"},
 		{"--demo", "config", "set", "message_open_target", "browser"},
@@ -123,6 +130,86 @@ func TestConfigRejectsInvalidInputWithoutWriting(t *testing.T) {
 				t.Fatalf("invalid command touched configuration: %v", err)
 			}
 		})
+	}
+}
+
+func TestNotificationStatusConfigDefaultsAndPreservesDeliverySetting(t *testing.T) {
+	configPath, statePath := configPaths(t)
+	if out, err := run(t, "config", "get", "notification_status"); err != nil || out != "on\n" {
+		t.Fatalf("default notification_status: %q, %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Dir(configPath)); !os.IsNotExist(err) {
+		t.Fatal("reading notification_status created configuration")
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"notifications":"off","sidebar_mode":"hidden","future_setting":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"off", "on"} {
+		out, err := run(t, "config", "set", "notification_status", value)
+		if err != nil || !strings.Contains(out, "notification_status = "+value) || !strings.Contains(out, "Restart slkt") {
+			t.Fatalf("set counter display: %q, %v", out, err)
+		}
+		out, err = run(t, "config", "get", "notification_status", "--json")
+		var got map[string]string
+		if err != nil || json.Unmarshal([]byte(out), &got) != nil || got["notification_status"] != value || len(got) != 1 {
+			t.Fatalf("saved counter display: %q, %v", out, err)
+		}
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved map[string]any
+		if json.Unmarshal(data, &saved) != nil || saved["notification_status"] != value || saved["notifications"] != "off" || saved["sidebar_mode"] != "hidden" || saved["future_setting"] != true {
+			t.Fatalf("counter display overwrote other preferences: %s", data)
+		}
+	}
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatal("counter display configuration touched read positions")
+	}
+}
+
+func TestNotificationConfigDefaultsAndRoundTrip(t *testing.T) {
+	configPath, statePath := configPaths(t)
+	if out, err := run(t, "config", "get", "notifications"); err != nil || out != "on\n" {
+		t.Fatalf("default notifications: %q, %v", out, err)
+	}
+	if _, err := os.Stat(filepath.Dir(configPath)); !os.IsNotExist(err) {
+		t.Fatal("config get created files")
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	const original = `{"message_open_target":"browser","sidebar_mode":"hidden","hidden_conversations":{"T1/U1":{"C1":true}},"last_conversations":{"T1/U1":"C2"},"future_setting":true}`
+	if err := os.WriteFile(configPath, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{"off", "on"} {
+		for _, args := range [][]string{{"config", "set", "notifications", value, "--json"}, {"config", "get", "notifications", "--json"}} {
+			out, err := run(t, args...)
+			var got map[string]string
+			if err != nil || json.Unmarshal([]byte(out), &got) != nil || got["notifications"] != value || len(got) != 1 {
+				t.Fatalf("notification configuration: %q, %v", out, err)
+			}
+		}
+	}
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before, after map[string]any
+	_ = json.Unmarshal([]byte(original), &before)
+	_ = json.Unmarshal(data, &after)
+	delete(after, "notifications")
+	left, _ := json.Marshal(before)
+	right, _ := json.Marshal(after)
+	if string(left) != string(right) {
+		t.Fatalf("notifications replaced other settings: %s", data)
+	}
+	if _, err := os.Stat(statePath); !os.IsNotExist(err) {
+		t.Fatal("configuration changed read positions")
 	}
 }
 

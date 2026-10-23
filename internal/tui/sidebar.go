@@ -12,9 +12,10 @@ import (
 
 type unreadTickMsg time.Time
 type unreadResult struct {
-	channel string
-	latest  string
-	err     error
+	channel  string
+	latest   string
+	messages []core.Message
+	err      error
 }
 
 func (m model) isUnread(channel string) bool {
@@ -176,6 +177,11 @@ func (m *model) toggleSidebarHidden() {
 		m.status = "Unhid " + c.Label()
 	}
 	m.hiddenDirty[c.ID] = hide
+	// Unhiding resumes alerts from this point, without announcing messages
+	// that arrived while hidden (including a history request still in flight).
+	if m.notificationsEnabled() {
+		m.notificationSeen[c.ID] = max(m.notificationSeen[c.ID], localdata.NewReadState(time.Now()).StartedAt)
+	}
 	m.sidebarReadID = ""
 	// Keep the row when it still belongs to this mode; otherwise select the
 	// next row, or the previous row when removing the last item.
@@ -286,7 +292,7 @@ func (m model) nextUnreadConversation() (core.Conversation, int) {
 	if m.identity.TeamID != "" {
 		for offset := range m.conversations {
 			i := (m.unreadIndex + offset) % len(m.conversations)
-			if c := m.conversations[i]; c.ID != m.main.conversation.ID && m.matchesHiddenFilter(c.ID) {
+			if c := m.conversations[i]; c.ID != m.main.conversation.ID && (m.matchesHiddenFilter(c.ID) || m.notificationsEnabled() && !m.hidden[c.ID]) {
 				return c, i
 			}
 		}
@@ -300,6 +306,6 @@ func (m model) unreadCmd(channel string) tea.Cmd {
 		ctx, cancel := context.WithTimeout(m.ctx, 45*time.Second)
 		defer cancel()
 		page, err := m.service.Backend.History(ctx, channel, core.PageOptions{Limit: 1, After: after})
-		return unreadResult{channel: channel, latest: newestTimestamp(page.Messages), err: err}
+		return unreadResult{channel: channel, latest: newestTimestamp(page.Messages), messages: page.Messages, err: err}
 	}
 }
