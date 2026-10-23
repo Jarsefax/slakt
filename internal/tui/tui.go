@@ -36,6 +36,7 @@ type Options struct {
 	Demo         bool
 	Store        *localdata.Store
 	Version      string
+	Events       core.EventSource
 }
 
 type view struct {
@@ -58,6 +59,15 @@ type view struct {
 }
 
 type model struct {
+	liveRevision                         uint64
+	liveChanges                          []liveChange
+	liveEvents                           chan core.LiveEvent
+	liveStarted, liveConnected           bool
+	liveDetail                           string
+	liveSeen                             map[string]bool
+	liveOrder                            []string
+	liveDirectoryPending                 bool
+	livePending                          []core.LiveEvent
 	ctx                                  context.Context
 	service                              *core.Service
 	options                              Options
@@ -130,6 +140,7 @@ type directoryResult struct {
 	lastConversation string
 }
 type messagesResult struct {
+	liveRevision    uint64
 	channel, thread string
 	generation      int
 	more            bool
@@ -160,6 +171,7 @@ type dmResult struct {
 	err          error
 }
 type pollResult struct {
+	liveRevision    uint64
 	channel, thread string
 	generation      int
 	main, replies   []core.Message
@@ -173,6 +185,8 @@ type editorResult struct {
 }
 
 func Run(ctx context.Context, service *core.Service, opts Options) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	if opts.PollInterval < 5*time.Second {
 		return fmt.Errorf("poll interval must be at least 5s")
 	}
@@ -350,7 +364,7 @@ func (m model) loadCmd(v view, more bool) tea.Cmd {
 			}
 		}
 		page, err := m.service.Messages(ctx, v.conversation.ID, v.thread, opts)
-		return messagesResult{v.conversation.ID, v.thread, v.generation, more, page, err}
+		return messagesResult{channel: v.conversation.ID, thread: v.thread, generation: v.generation, more: more, page: page, err: err, liveRevision: m.liveRevision}
 	}
 }
 
@@ -420,7 +434,7 @@ func (m model) pollCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(m.ctx, 2*time.Minute)
 		defer cancel()
-		r := pollResult{channel: main.conversation.ID, thread: thread.thread, generation: main.generation}
+		r := pollResult{liveRevision: m.liveRevision, channel: main.conversation.ID, thread: thread.thread, generation: main.generation}
 		r.main, r.err = fetchUpdates(ctx, m.service, main)
 		if r.err == nil && thread.thread != "" {
 			r.replies, r.err = fetchUpdates(ctx, m.service, thread)
@@ -645,6 +659,11 @@ func (m *model) merge(v *view, incoming []core.Message, initial, older bool) {
 func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	updated, cmd := m.update(message)
 	next := updated.(model)
+	if next.options.Events != nil && next.identity.TeamID != "" && !next.liveStarted {
+		next.liveStarted = true
+		next.liveEvents = make(chan core.LiveEvent, 256)
+		cmd = tea.Batch(cmd, next.startLiveCmd())
+	}
 	cmd = tea.Batch(cmd, next.syncPreview())
 	if next.readingMain() {
 		next.markRead(next.main.conversation.ID, next.main.messages)
@@ -663,6 +682,25 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := message.(type) {
+	case liveResult:
+		return m.handleLive(msg)
+	case liveDirectoryResult:
+		m.liveDirectoryPending = false
+		if msg.err == nil {
+			selected := m.sidebarSelectedID()
+			m.conversations, m.users = msg.conversations, msg.users
+			m.names = m.service.UserNames()
+			m.selectSidebar(selected)
+		}
+		pending := m.livePending
+		m.livePending = nil
+		var commands []tea.Cmd
+		for _, event := range pending {
+			if m.knownLiveChannel(event.Channel) {
+				commands = append(commands, m.applyLive(event))
+			}
+		}
+		return m, tea.Batch(commands...)
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.composer.SetHeight(3)
@@ -690,6 +728,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.notificationSkipped("preview", msg.channel, nil, "fetch failed")
 			return m, nil
 		}
+		msg.page.Messages = m.reconcileLive(msg.channel, msg.page.Messages, msg.liveRevision)
 		m.names = m.service.UserNames()
 		m.merge(m.preview, messagesAfter(msg.page.Messages, m.previewAfter), true, false)
 		m.preview.cursor, m.preview.hasMore = msg.page.Cursor, msg.page.HasMore
@@ -743,6 +782,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.notificationSkipped("history", msg.channel, nil, "fetch failed")
 			return m, nil
 		}
+		msg.page.Messages = m.reconcileLive(msg.channel, msg.page.Messages, msg.liveRevision)
 		m.names = m.service.UserNames()
 		m.merge(v, msg.page.Messages, !msg.more, msg.more && v.thread == "")
 		v.cursor, v.hasMore = msg.page.Cursor, msg.page.HasMore
@@ -756,6 +796,9 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.notificationSkipped("history", msg.channel, msg.page.Messages, "history pagination")
 		}
 	case unreadTickMsg:
+		if m.liveStarted && !m.nextUnreadCheck.IsZero() && time.Time(msg).Before(m.nextUnreadCheck) {
+			return m, nil
+		}
 		if m.unreadPolling {
 			return m, nil
 		}
@@ -782,6 +825,9 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollCountdownMsg:
 		return m, pollCountdownTick()
 	case tickMsg:
+		if m.liveStarted && (m.polling || !m.nextPoll.IsZero() && time.Time(msg).Before(m.nextPoll)) {
+			return m, nil
+		}
 		if !m.polling && !m.main.loading && m.main.conversation.ID != "" && !m.sending {
 			m.polling = true
 			m.pollCurrent = m.main.conversation
@@ -789,9 +835,11 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.nextPoll = time.Time{}
 			return m, m.pollCmd()
 		}
-		m.nextPoll = time.Now().Add(m.options.PollInterval)
+		m.nextPoll = time.Now().Add(m.refreshInterval())
 		return m, m.tick()
 	case pollResult:
+		msg.main = m.reconcileLive(msg.channel, msg.main, msg.liveRevision)
+		msg.replies = m.reconcileLive(msg.channel, msg.replies, msg.liveRevision)
 		m.polling = false
 		m.pollCurrent = core.Conversation{}
 		m.pollThread = false
@@ -814,7 +862,7 @@ func (m model) update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.status = "Updated " + time.Now().Format("15:04:05")
 			}
 		}
-		m.nextPoll = time.Now().Add(m.options.PollInterval)
+		m.nextPoll = time.Now().Add(m.refreshInterval())
 		return m, tea.Batch(cmd, m.tick())
 	case searchResult:
 		if msg.query != m.searchQuery {

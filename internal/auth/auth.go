@@ -87,11 +87,12 @@ func (KeyringStore) Delete() error {
 
 // Manager serializes refreshes across CLI and TUI processes. No tokens go in the lock file.
 type Manager struct {
-	Store    Store
-	OAuth    OAuth
-	LockPath string
-	mu       sync.Mutex
-	identity string
+	Store          Store
+	OAuth          OAuth
+	LockPath       string
+	mu             sync.Mutex
+	identity       string
+	socketIdentity string
 }
 
 func NewManager() (*Manager, error) {
@@ -160,7 +161,20 @@ func (m *Manager) Save(ctx context.Context, c Credentials) error {
 }
 
 func (m *Manager) Logout(ctx context.Context) error {
-	return m.locked(ctx, m.Store.Delete)
+	return m.locked(ctx, func() error {
+		if _, ok := m.Store.(KeyringStore); ok {
+			c, err := m.Store.Load()
+			if err != nil && !errors.Is(err, ErrNotLoggedIn) {
+				return err
+			}
+			if err == nil {
+				if err := keyring.Delete("slakt", socketAccount(c)); err != nil && !errors.Is(err, keyring.ErrNotFound) {
+					return errors.New("cannot remove Socket Mode credential from OS keyring")
+				}
+			}
+		}
+		return m.Store.Delete()
+	})
 }
 
 type OAuth struct {

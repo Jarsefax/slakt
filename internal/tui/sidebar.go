@@ -270,6 +270,9 @@ func (m *model) persistLocal() {
 // A single round-robin request at a time starts at most 20 checks/minute.
 // Larger workspaces take longer to scan, rather than creating request bursts.
 func (m model) unreadInterval() time.Duration {
+	if m.liveConnected {
+		return max(30*time.Second, m.options.PollInterval)
+	}
 	interval := 3 * time.Second
 	if len(m.conversations) > 0 {
 		interval = max(interval, m.options.PollInterval/time.Duration(len(m.conversations)))

@@ -2,7 +2,9 @@
 
 Use an internal app approved for your company workspace. Each user authorizes
 their own account; slakt does not use a bot identity or the official Slack
-client's cookies. No client secret or app-level token is required for this version.
+client's cookies. User login uses PKCE without a client secret. Optional Socket
+Mode stores its app-level credentials in the OS keyring; rotating app-level
+tokens also require the app client secret for their refresh grant.
 
 ## Configure the app
 
@@ -47,9 +49,9 @@ Ctrl+c. A port conflict is an error; choose and register another localhost port.
 `auth.test` checks identity; `chat.getPermalink` opens a selected message in Slack.
 Actual method/scope coverage must be verified against the installed app. Missing
 scopes produce an actionable error; update the app and authorize again. No bot
-scopes, Socket Mode configuration, app-level secret, or public event endpoint are
-used. Slack's history rate limits depend on app classification: confirm the app
-qualifies as an internal customer-built app before relying on 15-second polling.
+scopes or public event endpoint are required. Slack's history rate limits depend
+on app classification: confirm the app qualifies as an internal customer-built
+app before relying on polling.
 Increase `--poll-interval` if needed; reads honor Slack's Retry-After response.
 
 The conversation directory groups public/private channels, DMs, and group DMs
@@ -59,6 +61,84 @@ response may omit starred metadata; slakt does not fetch every conversation's
 details to fill it in. No additional scope is needed. Custom Slack sidebar
 sections are not exposed by the documented Web API, and the deprecated
 `stars.list` saved-items API is not used.
+
+## Receive live updates with Socket Mode
+
+1. Apply the updated manifest, or enable **Socket Mode** and **Event Subscriptions**
+   in app management. Subscribe **on behalf of users** (workspace/user events) to
+   `message.channels`, `message.groups`, `message.im`, and `message.mpim`.
+   The existing history user scopes cover these message subscriptions. Reauthorize
+   if Slack requests it. Bot subscriptions alone will not cover your personal DMs.
+2. Under **Basic Information → App-Level Tokens**, generate an app-level token
+   with **connections:write** for the same Slack app as your user login. Both
+   `xapp-` and rotating `xoxe.xapp-` access tokens are supported. For a rotating
+   token, copy its accompanying `xoxe-` refresh token when Slack displays it;
+   the values are only shown once. Also have the **Client Secret** from Basic
+   Information → App Credentials ready. Keep all three values private.
+3. Run `slkt auth socket` and paste the access token at its hidden prompt. For
+   a rotating token, it then asks for the app-level refresh token and app client
+   secret, also hidden. This stores the supplied pair in the keyring, immediately
+   refreshes it to establish a known expiry, saves the replacement pair, and checks
+   `apps.connections.open`. It also supports an already expired access token when
+   the accompanying refresh token is still valid. For a non-rotating token, the
+   socket check happens before storage. Setup does not verify event subscriptions;
+   verify those in app management. Never pass secrets as shell arguments.
+4. Restart `slkt`. The footer shows connection state or polling fallback. Verify
+   a new message in an inactive public channel, private channel, DM, and group DM
+   updates unread state and notifications without waiting for a scan. Verify a
+   thread reply, edit, deletion, and network disconnect/reconnect as well.
+
+Use `slkt --poll-only` for a polling session, or `slkt auth socket --remove` to
+remove this account's stored app-level credential. Restart a running TUI after
+changing credentials. `slkt doctor` reports whether a credential is configured;
+it does not refresh app tokens, open a socket, or verify subscription coverage.
+
+For automated input, provide one secret per line on stdin: access token alone for
+`xapp-`, or access token, refresh token, and client secret for `xoxe.xapp-`, in that
+order. Use a secure credential source; do not place literal secrets in shell history.
+
+Rotating credentials are stored together as JSON in the account-scoped keyring
+entry. While connected, slkt checks them once a minute and refreshes within five
+minutes of expiry. Each refresh uses the latest single-use refresh token and saves
+both replacements before exposing the access token. Cross-process authentication
+locking serializes refresh grants. The separate stream lock stays stable when
+tokens rotate, and reconnects reload the current access token from the keyring.
+Existing non-rotating credentials remain usable.
+
+If a refresh response is lost, invalid, or cannot be saved, slkt retains a marker
+in the keyring and does not replay the possibly consumed refresh token, even
+after restart. Generate a fresh app-level access/refresh pair and rerun
+`slkt auth socket` after unlocking the keyring or restoring connectivity. It falls
+back to polling until valid credentials are configured and the TUI is restarted.
+A successful refresh followed by a failed socket check leaves the new credentials
+stored; fix the Socket Mode settings or connectivity and restart slkt.
+
+Events follow the authorized users' scopes and conversation membership; Socket
+Mode does not grant access to every conversation in a workspace. The client
+filters workspace and conversation IDs, acknowledges envelopes, deduplicates
+recent event IDs, reconnects automatically, and never logs event bodies or tokens.
+New conversations trigger a directory refresh before applying their events.
+Ordinary replies update the thread and parent's reply count without adding a
+main timeline row. They can trigger notifications but do not advance the main
+conversation's unread position. Broadcast replies also update the main timeline.
+Edits/deletions do not generate new-message alerts. Reaction events, if separately
+subscribed with their required scopes, refresh the open conversation.
+
+While connected, the open view reconciles at least every two minutes (or the
+configured interval when longer), and background history checks run at least
+30 seconds apart. On connection failure, the ordinary polling schedule resumes;
+a failed connection cannot erase cached messages or unread positions. Opening
+and reconnecting also reconcile the open view. The background scan catches
+messages received while offline; large workspaces still take time to finish a
+scan. Push delivery does not provide Slack read-position synchronization.
+
+**One independent client per Slack app:** Slack distributes events among an
+app's connections; it does not broadcast each event to every slkt instance.
+A local lock prevents two instances using the same app token from splitting
+updates on this machine; the second instance polls until the lock is released.
+Different tokens for the same app still share its stream. Use a dedicated Slack
+app for each independent user/client across machines, or deploy a shared relay
+that routes events to clients. A shared relay is not included in slkt.
 
 ## Credential service
 
@@ -75,9 +155,14 @@ authorization must be repeated when Slack rejects refresh. Storage failures do
 not silently fall back to a token file. If a refresh succeeds but saving fails,
 unlock the credential service and authorize again.
 
-`slkt auth logout` removes the local credential entry. To revoke access on Slack's
-side, remove the app authorization in Slack as well. A running operation may
-already have an access token in flight when another process logs out.
+`slkt auth logout` removes the active account's local user and Socket Mode
+credential entries. Socket credentials for other previously authorized accounts
+remain scoped to those accounts; remove them before switching accounts if needed.
+To revoke access on Slack's side, remove the app authorization in Slack as well.
+Close running TUI sessions when logging out: an already established Socket Mode
+connection checks stored credentials once a minute and closes when its credential
+is removed. Close it explicitly to stop immediately. A running
+operation may also have a user access token in flight.
 
 ## Owner acceptance checklist
 
@@ -104,3 +189,8 @@ These checks require the owner's app and account. Credentials stay on the machin
 - [Conversation history and app rate tiers](https://docs.slack.dev/reference/methods/conversations.history/)
 - [User conversations](https://docs.slack.dev/reference/methods/users.conversations/)
 - [Message search](https://docs.slack.dev/reference/methods/search.messages/)
+
+- [Socket Mode setup and connection behavior](https://docs.slack.dev/apis/events-api/using-socket-mode/)
+- [User and bot event subscriptions](https://docs.slack.dev/apis/events-api/)
+
+- [Rotating app-level refresh grants](https://docs.slack.dev/authentication/using-token-rotation/)

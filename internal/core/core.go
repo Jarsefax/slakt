@@ -143,6 +143,19 @@ type Backend interface {
 	Permalink(context.Context, string, string) (string, error)
 }
 
+// LiveEvent is independent of Slack's wire format. Status events have State set;
+// message events carry an upsert, a deletion timestamp, or a refresh hint.
+type LiveEvent struct {
+	State, Detail, TeamID, ID, Channel, ChannelType string
+	Message                                         Message
+	Deleted                                         string
+	Changed, Refresh, Broadcast                     bool
+}
+
+type EventSource interface {
+	Events(context.Context, func(LiveEvent))
+}
+
 type Service struct {
 	Backend       Backend
 	mu            sync.Mutex

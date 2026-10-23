@@ -9,6 +9,13 @@ import (
 )
 
 func (m model) pollIndicator(now time.Time) string {
+	if m.liveStarted {
+		state := "socket: " + m.liveDetail
+		if m.liveConnected {
+			state = "socket: connected · reconciliation every " + m.refreshInterval().String()
+		}
+		return fit(state, max(1, m.width-1))
+	}
 	conversation := m.main.conversation
 	thread := m.thread != nil && m.thread.thread != ""
 	if m.polling && m.pollCurrent.ID != "" {

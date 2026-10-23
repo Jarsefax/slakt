@@ -13,10 +13,11 @@ import (
 // Preview results cannot be mistaken for an explicit conversation load, even
 // when the user opens the same conversation before its preview request returns.
 type previewResult struct {
-	channel    string
-	generation int
-	page       core.MessagePage
-	err        error
+	liveRevision uint64
+	channel      string
+	generation   int
+	page         core.MessagePage
+	err          error
 }
 
 func (m *model) clearPreview() {
@@ -101,9 +102,10 @@ func (m *model) syncPreview() tea.Cmd {
 	ctx, cancel := context.WithTimeout(m.ctx, 2*time.Minute)
 	m.previewCancel = cancel
 	service := m.service
+	revision := m.liveRevision
 	return func() tea.Msg {
 		defer cancel()
 		page, err := service.Messages(ctx, c.ID, "", core.PageOptions{Limit: 50, After: after})
-		return previewResult{channel: c.ID, generation: generation, page: page, err: err}
+		return previewResult{liveRevision: revision, channel: c.ID, generation: generation, page: page, err: err}
 	}
 }

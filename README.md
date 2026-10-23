@@ -354,7 +354,8 @@ notification service directly; no
 Disturb settings determine presentation. A missing service is reported in the
 TUI without interrupting polling. Demo mode never sends desktop notifications.
 
-Notifications use the existing polling schedule, including when the terminal
+Notifications use Socket Mode events when configured, or the existing polling
+schedule, including when the terminal
 is in the background. All non-hidden conversations remain eligible regardless
 of sidebar mode. Each successful check announces at most the newest incoming
 message it finds; repeated polls, edits, reactions, your own messages, and
@@ -460,9 +461,19 @@ expansion. Unsaved drafts do not survive process exit or a crash.
 
 ## Refresh behavior and limits
 
-- The TUI polls the open conversation and open thread with a **15-second**
-  interval by default. Change this with `--poll-interval 30s` (minimum 5s). This is not a
-  Socket Mode event feed and needs no app-level token.
+- With no Socket Mode credential (or with `--poll-only`), the TUI polls the open
+  conversation and open thread with a **15-second**
+  interval by default. Change this with `--poll-interval 30s` (minimum 5s). Polling needs no app-level token. Configure `slkt auth socket` for pushed
+  updates across authorized conversations. Both `xapp-` and rotating `xoxe.xapp-`
+  tokens are supported; rotating setup also asks for the refresh token and app
+  client secret, stores them in the keyring, and refreshes automatically. See [Socket Mode setup](docs/slack-app.md#receive-live-updates-with-socket-mode).
+- With Socket Mode connected, messages, thread replies, edits, and deletions
+  update immediately. The footer shows socket state. The open view reconciles
+  every two minutes (or a longer configured poll interval), and background history
+  checks run at least 30 seconds apart. Disconnections restore ordinary polling.
+  Reconnects refresh the open view; the background scan recovers inactive channels.
+  Each independent client needs its own Slack app, or a shared relay, because
+  Slack distributes an app's events among its connections.
 - The footer names the open conversation being polled, adds `+ thread` when a
   thread is open, and shows a progress bar, countdown, and configured interval:
   `poll #general [■■□□□] in 9s · interval 15s`. It displays `polling…` during
@@ -498,7 +509,7 @@ expansion. Unsaved drafts do not survive process exit or a crash.
 - Recent channel messages are refreshed for edits/reactions. Deleted cached
   messages and edits to older/thread replies may remain until reload. There are
   no exact unread counts or Slack read-position synchronization. Desktop alerts
-  are limited to messages detected by the running TUI's polling.
+  use messages detected by the running TUI through polling or Socket Mode.
 - Failed refreshes keep the current view. Polling catches up when connectivity
   returns; recovering very large gaps is limited to 100 pages per refresh.
 - Writes are never automatically retried. If a send's outcome is unknown, check

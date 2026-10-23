@@ -28,6 +28,7 @@ type options struct {
 	poll       time.Duration
 	service    *core.Service
 	manager    *auth.Manager
+	pollOnly   bool
 }
 
 func (o *options) getService() (*core.Service, error) {
@@ -70,6 +71,7 @@ func New(version string) *cobra.Command {
 	root.PersistentFlags().BoolVar(&o.demo, "demo", false, "Use an offline in-memory workspace")
 	root.PersistentFlags().BoolVar(&o.json, "json", false, "Print structured JSON for data commands")
 	root.PersistentFlags().DurationVar(&o.poll, "poll-interval", 15*time.Second, "TUI refresh interval (minimum 5s)")
+	root.PersistentFlags().BoolVar(&o.pollOnly, "poll-only", false, "Use polling even when a Socket Mode credential is configured")
 	root.RunE = func(cmd *cobra.Command, args []string) error { return o.openTUI(cmd, nil) }
 	root.CompletionOptions.DisableDefaultCmd = true
 	addConfigCommand(root, o)
@@ -138,6 +140,7 @@ func New(version string) *cobra.Command {
 		return nil
 	}}
 	authCmd.AddCommand(login, status, logout)
+	addSocketCommand(authCmd, o)
 	root.AddCommand(&cobra.Command{Use: "channels", Short: "List your joined channels, private conversations, and DMs", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, args []string) error {
 		s, err := o.getService()
 		if err != nil {
@@ -265,10 +268,24 @@ func New(version string) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if o.json {
-			return writeJSON(cmd.OutOrStdout(), map[string]any{"ok": true, "identity": id, "conversations": len(conversations), "users": len(users), "demo": o.demo, "updates": "polling"})
+		updates := "polling"
+		if !o.demo && !o.pollOnly {
+			m, err := o.getManager()
+			if err != nil {
+				return err
+			}
+			config, err := m.SocketConfig(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if config.AccessToken != "" {
+				updates = "socket configured (run TUI to connect; verify subscriptions in Slack)"
+			}
 		}
-		fmt.Fprintf(cmd.OutOrStdout(), "OK  authentication: %s / %s\nOK  directory: %d conversations, %d users\nUpdates: polling (default 15s); no Socket Mode connection.\nHistory, search, sends, and reactions require their own scopes; see docs/slack-app.md.\n", render.Safe(id.Team), render.Safe(id.User), len(conversations), len(users))
+		if o.json {
+			return writeJSON(cmd.OutOrStdout(), map[string]any{"ok": true, "identity": id, "conversations": len(conversations), "users": len(users), "demo": o.demo, "updates": updates})
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "OK  authentication: %s / %s\nOK  directory: %d conversations, %d users\nUpdates: %s\nHistory, search, sends, and reactions require their own scopes; see docs/slack-app.md.\n", render.Safe(id.Team), render.Safe(id.User), len(conversations), len(users), updates)
 		return nil
 	}})
 	return root
@@ -341,7 +358,21 @@ func (o *options) openTUI(cmd *cobra.Command, c *core.Conversation) error {
 	if err != nil {
 		return err
 	}
-	return tui.Run(cmd.Context(), s, tui.Options{Initial: c, PollInterval: o.poll, Demo: o.demo, Version: cmd.Root().Version})
+	opts := tui.Options{Initial: c, PollInterval: o.poll, Demo: o.demo, Version: cmd.Root().Version}
+	if !o.demo && !o.pollOnly {
+		m, err := o.getManager()
+		if err != nil {
+			return err
+		}
+		config, err := m.SocketConfig(cmd.Context())
+		if err != nil {
+			return err
+		}
+		if config.AccessToken != "" {
+			opts.Events = socketSource(s, m, config)
+		}
+	}
+	return tui.Run(cmd.Context(), s, opts)
 }
 
 func printMessages(w io.Writer, messages []core.Message, names map[string]string) {
